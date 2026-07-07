@@ -43,6 +43,16 @@ FORBIDDEN_PHRASES = (
 )
 
 
+def validate_facts(body: str, facts) -> list["ValidationIssue"]:
+    """Fact-consistency layer (delegates to shared ``fact_checks``)."""
+    from fact_checks import run_fact_checks
+
+    return [
+        ValidationIssue(code, message)
+        for code, message in run_fact_checks(body, facts)
+    ]
+
+
 def _has_markdown_table(text: str) -> bool:
     return bool(re.search(r"^\|.+\|\s*$", text, re.MULTILINE))
 
@@ -79,6 +89,7 @@ def validate_single_stock_report(
     body: str,
     row: dict[str, str],
     *,
+    facts=None,
     has_news: bool,
 ) -> ValidationResult:
     issues: list[ValidationIssue] = []
@@ -180,5 +191,7 @@ def validate_single_stock_report(
                     f"報告不應包含「{phrase}」",
                 )
             )
+
+    issues.extend(validate_facts(text, facts))
 
     return ValidationResult(passed=not issues, issues=issues)

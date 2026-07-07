@@ -61,15 +61,26 @@ Chat UI：`/gate 2409` 或 `/report-gate 2409`
 
 - `reports/stock/{日期}/tw_stock_{代碼}.md`
 - `reports/stock/{日期}/tw_stock_{代碼}.pdf`（除非 `--skip-pdf`）
-- `reports/stock/{日期}/tw_stock_{代碼}.gate.log`（每輪驗證 JSON 紀錄）
+- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 並作為事實驗證基準）
+- `reports/stock/{日期}/tw_stock_{代碼}.gate.log`（每輪驗證 JSON 紀錄，含 `layers` 與 `issue_codes`）
 - `reports/stock/{日期}/tw_stock_{代碼}.gate.rounds/`（各輪比較）
   - `index.md` — 輪次摘要與比較指引
   - `r01.body.md` / `r01.prompt.txt` / `r01.validation.json`
   - `r02.*` …（若有第二輪修正）
 
-## Validation Criteria
+## Validation Criteria（分層 gate）
 
-- 須含：當日籌碼解讀、**近 N 日籌碼趨勢**（延續/轉折/背離）、新聞、交叉對照、短中線情境推演、觀察重點、免責聲明
+驗證分為兩層，任一層失敗即進入下一輪 agy 修正：
+
+1. **格式層（format）**：須含當日籌碼解讀、**近 N 日籌碼趨勢**（延續/轉折/背離）、新聞、交叉對照、短中線情境推演、觀察重點、免責聲明；表格/條列規範。
+2. **事實層（facts）**：正文方向不可與 `facts.json` 矛盾——
+   - `fact_foreign_direction`：外資買/賣方向與系統判定相反（僅檢查「當日籌碼解讀」段落，並排除新聞表格與區間趨勢敘述，避免「當日買、區間賣」或新聞標題造成誤判）
+   - `fact_ma5_position`：站上/跌破 MA5 與系統判定相反（同樣僅檢查當日籌碼段）
+   - `fact_divergence_ignored`：facts 標記背離/風險，正文卻稱籌碼健康
+   - `anchors_underused`：正文引用的系統事實概念不足（至少 2 項）
+
+- **Harness：** agy 不再直接讀 CSV，改依 `facts.json`（Python 確定性計算）撰寫敘事。
+- **Loop：** `build_fix_prompt` 依 `issue_codes` 給出對應的修正指引，第二輪針對矛盾修正而非只補章節。
 - **自主執行階段：** 驗證失敗時自動進入下一輪 agy 修正，無需人工確認。
 - **人工介入（臨界點）：** 達 `--max-rounds` 仍失敗；或 exit 10 / 20。
 - 預設 `MAX_ROUNDS = 3`。

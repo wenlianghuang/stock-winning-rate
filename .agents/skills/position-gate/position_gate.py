@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
@@ -77,6 +77,23 @@ def _load_report_writer():
     return ReportMeta, write_position_artifacts
 
 
+def _load_chip_facts(csv_path: Path):
+    """Compute deterministic chip facts from the snapshot row + history CSV."""
+    _ensure_import_paths()
+    from chip_signals import build_chip_facts, facts_summary_for_prompt, write_facts_json
+    from chip_tables import load_history_rows
+
+    row = parse_csv_row(csv_path)
+    history_rows = load_history_rows(csv_path)
+    facts = build_chip_facts(row, history_rows)
+    facts_path = csv_path.with_suffix(".facts.json")
+    try:
+        write_facts_json(facts_path, facts)
+    except OSError:
+        pass
+    return facts, facts_summary_for_prompt(facts)
+
+
 def _to_holding_info(record: HoldingRecord):
     _ensure_import_paths()
     from position_prompts import HoldingInfo
@@ -139,6 +156,7 @@ def build_initial_prompt(
     csv_path: Path,
     row: dict[str, str],
     holding: HoldingRecord,
+    facts_summary: str,
     news_text: str | None,
     user_prompt: str,
 ) -> str:
@@ -148,7 +166,6 @@ def build_initial_prompt(
 
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", stock_id)).strip()
-    hist_path = history_csv_path(csv_path)
     holding_info = _to_holding_info(holding)
     close_price = parse_close_price(row)
     pnl_pct = (
@@ -165,14 +182,13 @@ def build_initial_prompt(
         )
     else:
         news_section = (
-            "近期新聞：未取得（請僅依 CSV 籌碼分析市場面，並註明缺少新聞來源）。\n"
+            "近期新聞：未取得（請僅依 facts 籌碼分析市場面，並註明缺少新聞來源）。\n"
         )
 
     suffix = build_position_analysis_prompt_suffix(
         stock_name=stock_name,
         stock_id=stock_id,
-        csv_path=str(csv_path),
-        history_csv_path=str(hist_path) if hist_path.exists() else None,
+        facts_summary=facts_summary,
         holding=holding_info,
         unrealized_pnl_pct=pnl_pct,
         close_price=close_price,
@@ -182,26 +198,49 @@ def build_initial_prompt(
     return f"使用者請求：{user_prompt}\n\n{suffix}\n"
 
 
+POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
+    "fact_foreign_direction": "市場面外資方向與系統 facts 相反，請改為與 facts 一致的買/賣方向",
+    "fact_ma5_position": "市場面對 MA5 站上/跌破的描述與 facts 相反，請依 facts 修正",
+    "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，市場面不可描述為籌碼健康",
+    "anchors_underused": "市場面須明確引用系統 facts 概念（至少 2 項）",
+    "position_loss_no_risk_control": "此部位虧損逾門檻，操作情境必須提出停損/減碼/風險控管方向",
+    "missing_action_direction": "操作情境須提及觀望/減碼/加碼/停損/獲利了結/持有等方向",
+    "missing_trigger_conditions": "操作情境須補上觸發條件或可觀察訊號",
+}
+
+
+def _targeted_fix_lines(validation: ValidationResult) -> str:
+    lines: list[str] = []
+    for issue in validation.issues:
+        hint = POSITION_FIX_HINT_BY_CODE.get(issue.code)
+        lines.append(f"- [{issue.code}] {hint or issue.message}")
+    return "\n".join(lines)
+
+
 def build_fix_prompt(
     csv_path: Path,
     row: dict[str, str],
     holding: HoldingRecord,
+    facts_summary: str,
     news_text: str | None,
     previous_body: str,
     validation: ValidationResult,
 ) -> str:
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", stock_id)).strip()
-    issues = "\n".join(f"- {line}" for line in validation.summary_lines())
+    issues = _targeted_fix_lines(validation)
     news_note = "系統已提供新聞" if news_text else "系統未取得新聞，請註明"
     return (
         f"上一版「{stock_name}（{stock_id}）」持股部位報告未通過自動驗證。\n"
         f"請依下列問題修正後，輸出完整新版報告正文到 stdout（Markdown）。\n\n"
-        f"驗證問題：\n{issues}\n\n"
-        f"CSV 路徑：{csv_path}\n"
+        f"=== 系統籌碼事實（facts，市場面方向以此為準）===\n{facts_summary}\n"
+        f"=== facts 結束 ===\n\n"
+        f"驗證問題（含修正指引）：\n{issues}\n\n"
         f"持股均價：{holding.avg_cost} 元，{holding.shares:,} 股\n"
         f"新聞狀態：{news_note}\n\n"
         "修正要求：\n"
+        "- 市場面方向（外資買/賣、站上/跌破 MA5）必須與 facts 一致\n"
+        "- 市場面須明確引用 facts 概念（至少 2 項）\n"
         "- 籌碼與部位數字由系統表格自動產生，正文勿重複列數字\n"
         "- 須含部位現況、市場面摘要、交叉對照、操作情境、風險提醒、免責聲明\n"
         "- 操作情境須含觸發條件，並提及觀望/減碼/加碼/停損/獲利了結等方向\n"
@@ -246,6 +285,27 @@ def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, in
     return body, result.returncode
 
 
+FACT_ISSUE_PREFIXES = ("fact_", "anchors_", "position_")
+
+
+def _layer_status(validation: ValidationResult) -> dict[str, str]:
+    """Classify issue codes into gate layers for observability."""
+    fact_codes = [
+        issue.code
+        for issue in validation.issues
+        if issue.code.startswith(FACT_ISSUE_PREFIXES)
+    ]
+    format_codes = [
+        issue.code
+        for issue in validation.issues
+        if not issue.code.startswith(FACT_ISSUE_PREFIXES)
+    ]
+    return {
+        "format": "fail" if format_codes else "pass",
+        "facts": "fail" if fact_codes else "pass",
+    }
+
+
 @dataclass
 class RoundLog:
     round: int
@@ -253,6 +313,8 @@ class RoundLog:
     agy_exit_code: int | None
     duration_sec: float
     issues: list[str]
+    issue_codes: list[str] = field(default_factory=list)
+    layers: dict[str, str] = field(default_factory=dict)
     prompt_path: str = ""
     body_path: str = ""
     validation_path: str = ""
@@ -383,6 +445,7 @@ def run_gate(
     skip_pdf: bool,
 ) -> int:
     row = parse_csv_row(csv_path)
+    facts, facts_summary = _load_chip_facts(csv_path)
     news_text = fetch_news_text(row)
     has_news = bool(news_text and news_text.strip())
     log_path = csv_path.with_name(f"{csv_path.stem}.position.gate.log")
@@ -397,7 +460,7 @@ def run_gate(
             return EXIT_CSV_MISSING
         body = extract_body_from_saved_md(md_path)
         validation = validate_position_report(
-            body, row, holding, has_news=has_news
+            body, row, holding, facts=facts, has_news=has_news
         )
         _print_validation(validation, round_no=0)
         return EXIT_OK if validation.passed else EXIT_VALIDATION_FAILED
@@ -414,16 +477,16 @@ def run_gate(
 
         if round_no == 1:
             prompt = build_initial_prompt(
-                csv_path, row, holding, news_text, user_prompt
+                csv_path, row, holding, facts_summary, news_text, user_prompt
             )
         else:
             prompt = build_fix_prompt(
-                csv_path, row, holding, news_text, body, validation
+                csv_path, row, holding, facts_summary, news_text, body, validation
             )
 
         body, agy_exit = run_agy(prompt)
         validation = validate_position_report(
-            body, row, holding, has_news=has_news
+            body, row, holding, facts=facts, has_news=has_news
         )
         duration = time.time() - round_started
 
@@ -452,6 +515,8 @@ def run_gate(
             agy_exit_code=agy_exit,
             duration_sec=duration,
             issues=issue_lines,
+            issue_codes=[issue.code for issue in validation.issues],
+            layers=_layer_status(validation),
             prompt_path=str(artifact_paths["prompt"]),
             body_path=str(artifact_paths["body"]),
             validation_path=str(artifact_paths["validation"]),

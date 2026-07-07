@@ -64,3 +64,16 @@ python3 .agents/skills/position-gate/position_gate.py --all-holdings
 
 - `reports/stock/{日期}/tw_stock_{代碼}_position.md`
 - `reports/stock/{日期}/tw_stock_{代碼}_position.pdf`（除非 `--skip-pdf`）
+- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 撰寫市場面並作為事實驗證基準）
+- `*.position.gate.log` 每輪含 `layers`（format / facts）與 `issue_codes`
+
+## Validation Criteria（分層 gate）
+
+與 `report-gate` 共用 `ui/fact_checks.py` 事實層：
+
+1. **格式層**：部位現況、市場面摘要、交叉對照、操作情境（含觸發條件與方向）、風險提醒、免責聲明。
+2. **事實層（共用）**：市場面方向不可與 `facts.json` 矛盾（`fact_foreign_direction` / `fact_ma5_position` / `fact_divergence_ignored` / `anchors_underused`）；已排除新聞表格、且「當日買、區間賣」等混合敘述不誤判。
+3. **部位決策層**：`position_loss_no_risk_control` — 未實現虧損逾 8% 時，操作情境須提出停損/減碼/出場等具體防禦手段。
+
+- **Harness：** agy 不再直接讀 CSV，改依 `facts.json` 撰寫市場面。
+- **Loop：** `build_fix_prompt` 依 `issue_codes` 給對應修正指引。

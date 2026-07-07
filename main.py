@@ -27,6 +27,7 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
         "tech",
     ),
     "api": (ROOT / "api" / "stock_api.py", "server,ui,stock"),
+    "gate-stats": (ROOT / "tools" / "gate_stats.py", None),
 }
 
 

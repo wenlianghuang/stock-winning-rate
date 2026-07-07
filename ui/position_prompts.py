@@ -45,19 +45,13 @@ def build_position_analysis_prompt_suffix(
     *,
     stock_name: str,
     stock_id: str,
-    csv_path: str,
-    history_csv_path: str | None,
+    facts_summary: str,
     holding: HoldingInfo,
     unrealized_pnl_pct: float | None,
     close_price: float | None,
     news_section: str,
     market_report_path: str | None,
 ) -> str:
-    history_note = (
-        f"歷史 CSV 路徑：{history_csv_path}\n"
-        if history_csv_path
-        else "歷史 CSV：未取得（請依快照 CSV 的區間摘要欄位分析趨勢，並註明缺少逐日明細）。\n"
-    )
     pnl_note = (
         f"未實現損益（系統試算）：{unrealized_pnl_pct:+.2f}%"
         if unrealized_pnl_pct is not None
@@ -71,7 +65,7 @@ def build_position_analysis_prompt_suffix(
     market_note = (
         f"市場觀察報告（可引用摘要，勿複製全文）：{market_report_path}\n"
         if market_report_path
-        else "市場觀察報告：尚無（請直接依 CSV 與新聞撰寫市場面摘要）。\n"
+        else "市場觀察報告：尚無（請直接依 facts 與新聞撰寫市場面摘要）。\n"
     )
     holding_note = (
         f"持股均價：{holding.avg_cost} 元/股\n"
@@ -84,16 +78,18 @@ def build_position_analysis_prompt_suffix(
 
     return (
         f"這是「單檔持股部位決策」任務：{stock_name}（{stock_id}）。\n"
-        f"請先讀取**當日快照 CSV**與**歷史 CSV**理解市場面，"
-        f"結合下方**部位資料**與新聞撰寫**部位決策正文**（Markdown）。\n"
-        f"快照 CSV 路徑：{csv_path}\n"
-        f"{history_note}"
+        f"系統已完成籌碼資料的**確定性計算**，下方 facts 為市場面唯一事實來源；"
+        f"請結合**部位資料**與新聞撰寫**部位決策正文**（Markdown），"
+        f"市場面方向不可與 facts 矛盾。\n\n"
+        f"=== 系統籌碼事實（facts）===\n{facts_summary}\n"
+        f"=== facts 結束 ===\n\n"
         f"{market_note}\n"
         f"## 系統提供的部位資料\n\n"
         f"{holding_note}\n"
         f"{news_section}\n\n"
         f"{POSITION_ANALYSIS_FORMAT_RULES}\n\n"
         "其他要求：\n"
+        "- 市場面方向（外資買/賣、站上/跌破 MA5）須與 facts 一致\n"
         "- 市場面分析須客觀，勿因套牢或獲利而扭曲籌碼解讀\n"
         "- 操作情境須具體說明對**這筆部位**的意義，而非泛泛而談\n"
         "- 新聞只能引用上方內容，不可臆造\n"

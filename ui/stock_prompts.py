@@ -4,9 +4,10 @@ from __future__ import annotations
 
 ANALYSIS_FORMAT_RULES = """
 輸出格式（Markdown）：
-- **不要**重複列出 CSV 籌碼數字（系統會自動在報告前段插入籌碼表格，含當日、區間摘要與歷史明細）
+- **不要**重複列出籌碼數字（系統會自動在報告前段插入籌碼表格，含當日、區間摘要與歷史明細）
 - **數字與清單用表、解釋與推理用文字**（見各章節說明）
-- 分析須同時參考：**當日快照 CSV**、**歷史 CSV（逐日）**、**區間摘要欄位**（累計買賣超、MA5、區間漲跌幅等）
+- 分析須依據**系統已計算的籌碼事實（facts）**，方向判定不可與 facts 矛盾
+- 正文須明確引用 facts 中的 anchors（至少 2 條），作為趨勢與交叉對照的依據
 
 ## 一、當日籌碼解讀
 **純文字** 2～4 句，解讀當日法人/主力/融資券/當沖方向與意義（勿重複列數字、勿用表格）。
@@ -42,25 +43,22 @@ def build_single_stock_analysis_prompt_suffix(
     *,
     stock_name: str,
     stock_id: str,
-    csv_path: str,
-    history_csv_path: str | None = None,
+    facts_summary: str,
     news_section: str,
 ) -> str:
-    history_note = (
-        f"歷史 CSV 路徑：{history_csv_path}\n"
-        if history_csv_path
-        else "歷史 CSV：未取得（請僅依快照 CSV 的區間摘要欄位分析趨勢，並註明缺少逐日明細）。\n"
-    )
     return (
         f"這是「單檔個股」分析任務：{stock_name}（{stock_id}）。\n"
-        f"請先讀取**當日快照 CSV**與**歷史 CSV**理解籌碼，結合下方新聞撰寫**分析正文**（Markdown）。\n"
-        f"快照 CSV 路徑：{csv_path}\n"
-        f"{history_note}\n"
+        f"系統已完成籌碼資料的**確定性計算**，下方 facts 即是唯一事實來源；"
+        f"請**依 facts 撰寫分析正文**（Markdown），不要自行臆測與 facts 相反的方向。\n\n"
+        f"=== 系統籌碼事實（facts）===\n{facts_summary}\n"
+        f"=== facts 結束 ===\n\n"
         f"{news_section}\n\n"
         f"{ANALYSIS_FORMAT_RULES}\n\n"
         "其他要求：\n"
+        "- 方向（買/賣、偏多/偏空、站上/跌破 MA5）必須與 facts 一致\n"
+        "- 正文須明確引用 facts 的 anchors（至少 2 條）\n"
         "- 新聞只能引用上方內容，不可臆造\n"
-        "- 趨勢判斷須有歷史/區間依據，避免僅依單日數據下結論\n"
+        "- 趨勢判斷須依 facts 的區間欄位，避免僅依單日數據下結論\n"
         "- 完整正文印在 stdout，不要只寫入檔案\n"
         "- 不要加「工作摘要」或工具操作說明\n"
         "- 不要寫「跨股票對照」章節\n"

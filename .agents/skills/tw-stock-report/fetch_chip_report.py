@@ -653,6 +653,20 @@ def stock_history_csv_path(trade_date: str, stock_id: str) -> Path:
     return stock_report_dir(trade_date) / f"tw_stock_{stock_id}_history.csv"
 
 
+def stock_facts_json_path(trade_date: str, stock_id: str) -> Path:
+    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}.facts.json"
+
+
+def _load_chip_signals():
+    root = Path(__file__).resolve().parents[3]
+    ui_path = str(root / "ui")
+    if ui_path not in sys.path:
+        sys.path.insert(0, ui_path)
+    from chip_signals import build_chip_facts, write_facts_json
+
+    return build_chip_facts, write_facts_json
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="抓取台股個股籌碼資料並輸出 CSV 表格"
@@ -729,6 +743,18 @@ def main() -> int:
 
             snapshot_paths.append(snapshot_path)
             history_paths.append(history_path)
+
+            try:
+                build_chip_facts, write_facts_json = _load_chip_signals()
+                facts = build_chip_facts(snapshot, history)
+                write_facts_json(
+                    stock_facts_json_path(trade_date, stock_id), facts
+                )
+            except Exception as facts_exc:  # facts 為附加產物，失敗不應中斷抓取
+                print(
+                    f"WARNING: {stock_id} facts.json 產生失敗：{facts_exc}",
+                    file=sys.stderr,
+                )
 
             if yahoo is not None:
                 major_days = snapshot.get("區間主力資料天數", 0)

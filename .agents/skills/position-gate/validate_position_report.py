@@ -79,11 +79,62 @@ def _slice_after_keywords(body: str, keywords: tuple[str, ...]) -> str:
     return "\n".join(chunk)
 
 
+# 市場面段落關鍵字（供事實方向檢查鎖定；勿含「部位現況」以免誤鎖前段）
+_MARKET_SECTION_KEYWORDS = ("市場面摘要", "市場面")
+# 操作情境段落關鍵字
+_ACTION_SECTION_KEYWORDS = ("操作情境", "操作")
+# 虧損超過此百分比時，操作情境須提及具體防禦手段
+LOSS_RISK_THRESHOLD_PCT = -8.0
+# 只認具體防禦動作，不含泛稱「風險」（第五章標題本就含「風險」二字）
+_RISK_CONTROL_KEYWORDS = ("停損", "減碼", "出場", "調節", "停利", "獲利了結")
+
+
+def _fact_issues(body: str, facts) -> list[ValidationIssue]:
+    if facts is None:
+        return []
+    from fact_checks import run_fact_checks
+
+    return [
+        ValidationIssue(code, message)
+        for code, message in run_fact_checks(
+            body, facts, today_keywords=_MARKET_SECTION_KEYWORDS
+        )
+    ]
+
+
+def _position_decision_issues(
+    body: str, row: dict[str, str], holding: HoldingRecord
+) -> list[ValidationIssue]:
+    """部位專屬決策一致性：明顯虧損時操作情境須含具體防禦手段。"""
+    from fact_checks import _slice_after_keywords
+    from position_tables import compute_unrealized_pnl_pct, parse_close_price
+
+    close_price = parse_close_price(row)
+    if close_price is None or holding.avg_cost <= 0:
+        return []
+    pnl_pct = compute_unrealized_pnl_pct(holding.avg_cost, close_price)
+    if pnl_pct > LOSS_RISK_THRESHOLD_PCT:
+        return []
+
+    action_region = _slice_after_keywords(body, _ACTION_SECTION_KEYWORDS)
+    region = action_region if action_region.strip() else body
+    if any(keyword in region for keyword in _RISK_CONTROL_KEYWORDS):
+        return []
+    return [
+        ValidationIssue(
+            "position_loss_no_risk_control",
+            f"未實現損益約 {pnl_pct:.1f}%（虧損逾 {abs(LOSS_RISK_THRESHOLD_PCT):.0f}%），"
+            "操作情境須提出停損/減碼/出場等具體防禦手段",
+        )
+    ]
+
+
 def validate_position_report(
     body: str,
     row: dict[str, str],
     holding: HoldingRecord,
     *,
+    facts=None,
     has_news: bool,
 ) -> ValidationResult:
     issues: list[ValidationIssue] = []
@@ -191,5 +242,8 @@ def validate_position_report(
                     f"報告不應包含「{phrase}」",
                 )
             )
+
+    issues.extend(_fact_issues(text, facts))
+    issues.extend(_position_decision_issues(text, row, holding))
 
     return ValidationResult(passed=not issues, issues=issues)
