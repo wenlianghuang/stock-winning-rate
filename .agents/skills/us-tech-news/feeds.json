@@ -1,0 +1,71 @@
+{
+  "output_dir": "reports/us-tech",
+  "lookback_hours": 48,
+  "max_items_per_feed": 15,
+  "indices": [
+    {"symbol": "^IXIC", "name": "那斯達克綜合指數"},
+    {"symbol": "^SOX", "name": "費城半導體指數"}
+  ],
+  "feeds": [
+    {
+      "feed_id": "google-nasdaq",
+      "name": "Google News — Nasdaq",
+      "rss_url": "https://news.google.com/rss/search?q=NASDAQ+stock+market+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "category": "index"
+    },
+    {
+      "feed_id": "google-sox",
+      "name": "Google News — SOX / 半導體指數",
+      "rss_url": "https://news.google.com/rss/search?q=philadelphia+semiconductor+index+OR+SOX+index+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "category": "index"
+    },
+    {
+      "feed_id": "google-semiconductor",
+      "name": "Google News — 半導體 / AI 晶片",
+      "rss_url": "https://news.google.com/rss/search?q=NVDA+AMD+semiconductor+chip+AI+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "category": "semiconductor"
+    },
+    {
+      "feed_id": "google-big-tech",
+      "name": "Google News — 大型科技",
+      "rss_url": "https://news.google.com/rss/search?q=Microsoft+Google+Meta+Apple+Amazon+when:2d&hl=en-US&gl=US&ceid=US:en",
+      "category": "tech"
+    },
+    {
+      "feed_id": "cnbc-tech",
+      "name": "CNBC Technology",
+      "rss_url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+      "category": "tech"
+    },
+    {
+      "feed_id": "techcrunch",
+      "name": "TechCrunch",
+      "rss_url": "https://techcrunch.com/feed/",
+      "category": "tech"
+    },
+    {
+      "feed_id": "the-verge",
+      "name": "The Verge",
+      "rss_url": "https://www.theverge.com/rss/index.xml",
+      "category": "tech"
+    },
+    {
+      "feed_id": "ars-technica",
+      "name": "Ars Technica — Technology Lab",
+      "rss_url": "https://feeds.arstechnica.com/arstechnica/technology-lab",
+      "category": "tech"
+    },
+    {
+      "feed_id": "yahoo-finance",
+      "name": "Yahoo Finance — Top News",
+      "rss_url": "https://finance.yahoo.com/news/rssindex",
+      "category": "market"
+    },
+    {
+      "feed_id": "marketwatch",
+      "name": "MarketWatch — Top Stories",
+      "rss_url": "https://www.marketwatch.com/rss/topstories",
+      "category": "market"
+    }
+  ]
+}
