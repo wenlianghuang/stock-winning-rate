@@ -22,10 +22,6 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
         ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py",
         "ui,stock",
     ),
-    "backtest-gate": (
-        ROOT / ".agents" / "skills" / "backtest-gate" / "backtest_gate.py",
-        "stock",
-    ),
     "tech-news": (
         ROOT / ".agents" / "skills" / "us-tech-news" / "process_report.py",
         "tech",
