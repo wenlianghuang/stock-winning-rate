@@ -28,6 +28,9 @@ YAHOO_USER_AGENT = (
 DEFAULT_WATCHLIST = Path(__file__).with_name("watchlist.txt")
 SHARES_PER_LOT = 1000
 DEFAULT_LOOKBACK_DAYS = 5
+MA5_PERIOD = 5
+MA20_PERIOD = 20
+MARKET_INDEX_ID = "TAIEX"  # 加權指數（FinMind TaiwanStockPrice data_id）
 
 DAILY_COLUMNS = [
     "代碼",
@@ -72,6 +75,19 @@ SUMMARY_COLUMNS = [
     "區間漲跌幅_%",
     "MA5",
     "收盤偏離MA5_%",
+    "MA20",
+    "收盤偏離MA20_%",
+]
+
+# 大盤（加權指數）脈絡欄位：屬當日全市場資料，每檔快照共用同一組數字。
+MARKET_COLUMNS = [
+    "大盤收盤",
+    "大盤漲跌幅_%",
+    "大盤MA5",
+    "大盤MA20",
+    "大盤收盤偏離MA5_%",
+    "大盤收盤偏離MA20_%",
+    "大盤區間漲跌幅_%",
 ]
 
 
@@ -546,10 +562,37 @@ def build_daily_row(
     }
 
 
+def _moving_average(closes: list[float], period: int) -> float | None:
+    if len(closes) < period:
+        return None
+    return round(sum(closes[-period:]) / period, 2)
+
+
+def _ma_deviation_pct(close: float | None, ma: float | None) -> float | str:
+    if close is None or ma is None or ma == 0:
+        return ""
+    return round((close - ma) / ma * 100, 2)
+
+
+def _trailing_closes_from_dataset(
+    price_by_date: dict[str, dict[str, Any]],
+    end_date: str,
+) -> list[float]:
+    closes: list[float] = []
+    for day in sorted(price_by_date):
+        if day > end_date:
+            continue
+        close = _to_float(price_by_date[day].get("close"))
+        if close is not None:
+            closes.append(close)
+    return closes
+
+
 def compute_summary_fields(
     daily_rows: list[dict[str, Any]],
     *,
     lookback_days: int,
+    price_closes: list[float] | None = None,
 ) -> dict[str, Any]:
     if not daily_rows:
         return {key: "" for key in SUMMARY_COLUMNS}
@@ -571,18 +614,21 @@ def compute_summary_fields(
 
     closes = [_to_float(row.get("收盤價")) for row in daily_rows]
     valid_closes = [value for value in closes if value is not None]
-    ma_window = valid_closes[-5:] if len(valid_closes) >= 5 else valid_closes
-    ma5 = round(sum(ma_window) / len(ma_window), 2) if ma_window else ""
+    trailing_closes = price_closes if price_closes else valid_closes
 
-    last_close = valid_closes[-1] if valid_closes else None
+    ma5_val = _moving_average(trailing_closes, MA5_PERIOD)
+    ma5 = ma5_val if ma5_val is not None else ""
+    ma20_val = _moving_average(trailing_closes, MA20_PERIOD)
+    ma20 = ma20_val if ma20_val is not None else ""
+
+    last_close = trailing_closes[-1] if trailing_closes else None
     first_close = valid_closes[0] if valid_closes else None
     period_return = ""
     if first_close and last_close and first_close != 0:
         period_return = round((last_close - first_close) / first_close * 100, 2)
 
-    ma_deviation = ""
-    if ma5 != "" and last_close is not None and ma5 != 0:
-        ma_deviation = round((last_close - float(ma5)) / float(ma5) * 100, 2)
+    ma_deviation = _ma_deviation_pct(last_close, ma5_val)
+    ma20_deviation = _ma_deviation_pct(last_close, ma20_val)
 
     return {
         "回看天數": actual_days,
@@ -607,6 +653,78 @@ def compute_summary_fields(
         "區間漲跌幅_%": period_return,
         "MA5": ma5,
         "收盤偏離MA5_%": ma_deviation,
+        "MA20": ma20,
+        "收盤偏離MA20_%": ma20_deviation,
+    }
+
+
+def fetch_market_context(
+    client: FinMindClient,
+    trade_date: str,
+    lookback_dates: list[str],
+) -> dict[str, Any]:
+    """Fetch 加權指數（TAIEX）context: 收盤、當日漲跌幅、MA5/MA20、區間漲跌幅。
+
+    大盤脈絡屬全市場資料（與個股無關），main() 每個交易日抓一次即可共用。
+    """
+    empty = {col: "" for col in MARKET_COLUMNS}
+    if not lookback_dates:
+        lookback_dates = [trade_date]
+
+    ma_dates = resolve_lookback_dates(client, trade_date, MA20_PERIOD)
+    range_start = min(lookback_dates[0], ma_dates[0])
+    try:
+        rows = index_rows_by_date(
+            client.fetch_dataset(
+                "TaiwanStockPrice",
+                stock_id=MARKET_INDEX_ID,
+                start_date=range_start,
+                end_date=trade_date,
+            )
+        )
+    except Exception as exc:  # 大盤為附加脈絡，失敗不應中斷個股抓取
+        print(f"WARNING: 加權指數脈絡取得失敗：{exc}", file=sys.stderr)
+        return empty
+
+    closes_by_date = {
+        day: _to_float(rows[day].get("close"))
+        for day in sorted(rows)
+        if day <= trade_date and _to_float(rows[day].get("close")) is not None
+    }
+    if not closes_by_date:
+        return empty
+
+    trailing_closes = [closes_by_date[day] for day in sorted(closes_by_date)]
+    last_close = trailing_closes[-1]
+    ma5_val = _moving_average(trailing_closes, MA5_PERIOD)
+    ma20_val = _moving_average(trailing_closes, MA20_PERIOD)
+
+    today_row = rows.get(trade_date, {})
+    spread = _to_float(today_row.get("spread"))
+    today_close = _to_float(today_row.get("close"))
+    change_pct: float | str = ""
+    if spread is not None and today_close is not None:
+        prev_close = today_close - spread
+        if prev_close:
+            change_pct = round(spread / prev_close * 100, 2)
+
+    first_close = None
+    for day in sorted(closes_by_date):
+        if day >= lookback_dates[0]:
+            first_close = closes_by_date[day]
+            break
+    period_return: float | str = ""
+    if first_close and last_close and first_close != 0:
+        period_return = round((last_close - first_close) / first_close * 100, 2)
+
+    return {
+        "大盤收盤": last_close,
+        "大盤漲跌幅_%": change_pct,
+        "大盤MA5": ma5_val if ma5_val is not None else "",
+        "大盤MA20": ma20_val if ma20_val is not None else "",
+        "大盤收盤偏離MA5_%": _ma_deviation_pct(last_close, ma5_val),
+        "大盤收盤偏離MA20_%": _ma_deviation_pct(last_close, ma20_val),
+        "大盤區間漲跌幅_%": period_return,
     }
 
 
@@ -617,12 +735,15 @@ def build_stock_report(
     trade_date: str,
     lookback_dates: list[str],
     yahoo: YahooMajorFlowClient | None,
+    market_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not lookback_dates:
         lookback_dates = [trade_date]
 
-    range_start = lookback_dates[0]
+    ma_price_dates = resolve_lookback_dates(client, trade_date, MA20_PERIOD)
+    range_start = min(lookback_dates[0], ma_price_dates[0])
     datasets = fetch_stock_datasets(client, stock_id, range_start, trade_date)
+    price_closes = _trailing_closes_from_dataset(datasets["price"], trade_date)
 
     daily_rows: list[dict[str, Any]] = []
     for day in lookback_dates:
@@ -634,8 +755,10 @@ def build_stock_report(
     summary = compute_summary_fields(
         daily_rows,
         lookback_days=len(lookback_dates),
+        price_closes=price_closes,
     )
-    snapshot = {**daily_rows[-1], **summary}
+    market = market_context or {col: "" for col in MARKET_COLUMNS}
+    snapshot = {**daily_rows[-1], **summary, **market}
     return snapshot, daily_rows
 
 
@@ -711,6 +834,7 @@ def main() -> int:
         lookback_dates = resolve_lookback_dates(client, trade_date, lookback_days)
         stock_names = load_stock_names(client)
         yahoo = None if args.skip_major else YahooMajorFlowClient()
+        market_context = fetch_market_context(client, trade_date, lookback_dates)
 
         output_dir = stock_report_dir(trade_date)
         snapshot_paths: list[Path] = []
@@ -724,12 +848,13 @@ def main() -> int:
                 trade_date,
                 lookback_dates,
                 yahoo,
+                market_context=market_context,
             )
 
             snapshot_path = stock_csv_path(trade_date, stock_id)
             history_path = stock_history_csv_path(trade_date, stock_id)
 
-            snapshot_columns = DAILY_COLUMNS + SUMMARY_COLUMNS
+            snapshot_columns = DAILY_COLUMNS + SUMMARY_COLUMNS + MARKET_COLUMNS
             pd.DataFrame([snapshot], columns=snapshot_columns).to_csv(
                 snapshot_path,
                 index=False,

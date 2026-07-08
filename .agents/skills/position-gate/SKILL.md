@@ -65,15 +65,23 @@ python3 .agents/skills/position-gate/position_gate.py --all-holdings
 - `reports/stock/{日期}/tw_stock_{代碼}_position.md`
 - `reports/stock/{日期}/tw_stock_{代碼}_position.pdf`（除非 `--skip-pdf`）
 - `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 撰寫市場面並作為事實驗證基準）
-- `*.position.gate.log` 每輪含 `layers`（format / facts）與 `issue_codes`
+- `reports/stock/{日期}/tw_stock_{代碼}.position.facts.json`（**harness 產物**：部位確定性試算——損益分桶、距損益兩平、均價 vs MA20、系統傾向）
+- `*.position.gate.log` 每輪含 `layers`（format / facts / position / reasoning）與 `issue_codes`
 
 ## Validation Criteria（分層 gate）
 
-與 `report-gate` 共用 `ui/fact_checks.py` 事實層：
+與 `report-gate` 共用 `ui/fact_checks.py` 事實層與 `ui/reasoning_checks.py` 推理層；部位層由 `ui/position_signals.py` 提供：
 
 1. **格式層**：部位現況、市場面摘要、交叉對照、操作情境（含觸發條件與方向）、風險提醒、免責聲明。
-2. **事實層（共用）**：市場面方向不可與 `facts.json` 矛盾（`fact_foreign_direction` / `fact_ma5_position` / `fact_divergence_ignored` / `anchors_underused`）；已排除新聞表格、且「當日買、區間賣」等混合敘述不誤判。
-3. **部位決策層**：`position_loss_no_risk_control` — 未實現虧損逾 8% 時，操作情境須提出停損/減碼/出場等具體防禦手段。
+2. **事實層（共用）**：市場面方向不可與 `facts.json` 矛盾（含 chip_regime、法人共識、主力外資背離、個股相對大盤強弱 `fact_market_rs_mismatch`、收盤相對 MA20 月線 `fact_ma20_position`、短中線均線排列 `fact_ma_alignment_mismatch`、量能 `fact_volume_mismatch`、區間價格趨勢 `fact_price_trend_mismatch`）。
+3. **部位決策層（分桶）**：依 `position.facts.json` 的損益分桶要求操作情境對齊，**確保有無持股/不同成本會產出不同結論**——
+   - `position_scenario_unanchored`：操作情境未錨定損益（獲利/虧損/成本/均價/套牢）
+   - `position_profit_no_protection`：大幅獲利（>15%）未談停利/移動停損/獲利了結或續抱理由
+   - `position_profit_no_plan`：小幅獲利（3%~15%）未談加碼條件/停利/獲利回吐
+   - `position_breakeven_no_trigger`：損益兩平（±3%）未給明確出場/加碼觸發條件
+   - `position_loss_no_risk_control`：虧損（<-3%）未提停損/減碼/出場/攤平前提
+4. **推理層（共用）**：交叉對照須有籌碼依據；操作情境須有觸發條件；外資連續買賣須描述延續/轉折。
 
-- **Harness：** agy 不再直接讀 CSV，改依 `facts.json` 撰寫市場面。
-- **Loop：** `build_fix_prompt` 依 `issue_codes` 給對應修正指引。
+- **Harness：** agy 依 `facts.json`（v2 含 chip_regime、法人共識、MA5/MA20 位置與短中線對齊等）與 `position.facts.json`（損益分桶、均價 vs MA20）撰寫報告。
+- **Loop：** `build_fix_prompt` 依 `issue_codes` 給對應修正指引，並回饋部位狀態摘要。
+- **分桶門檻：** 於 `ui/position_signals.py` 頂部常數（`PROFIT_LARGE_PCT` 等）可調整停利/停損比例。

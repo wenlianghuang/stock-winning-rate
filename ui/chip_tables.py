@@ -132,12 +132,37 @@ def build_trend_summary_markdown(row: dict[str, str]) -> str | None:
         ["區間漲跌幅", _fmt_pct(row.get("區間漲跌幅_%", ""))],
         ["MA5", _fmt_num(row.get("MA5", ""))],
         ["收盤偏離 MA5", _fmt_pct(row.get("收盤偏離MA5_%", ""))],
+        ["MA20（月線）", _fmt_num(row.get("MA20", ""))],
+        ["收盤偏離 MA20", _fmt_pct(row.get("收盤偏離MA20_%", ""))],
     ]
 
     return "\n".join(
         [
             f"### 區間趨勢摘要（近 {period_label}）",
             _md_table(["項目", "數值"], summary_rows),
+        ]
+    )
+
+
+def build_market_context_markdown(row: dict[str, str]) -> str | None:
+    close = _cell(row.get("大盤收盤", ""))
+    if not close:
+        return None
+
+    market_rows = [
+        ["加權指數收盤", _fmt_num(row.get("大盤收盤", ""))],
+        ["大盤當日漲跌幅", _fmt_pct(row.get("大盤漲跌幅_%", ""))],
+        ["大盤 MA5", _fmt_num(row.get("大盤MA5", ""))],
+        ["大盤收盤偏離 MA5", _fmt_pct(row.get("大盤收盤偏離MA5_%", ""))],
+        ["大盤 MA20（月線）", _fmt_num(row.get("大盤MA20", ""))],
+        ["大盤收盤偏離 MA20", _fmt_pct(row.get("大盤收盤偏離MA20_%", ""))],
+        ["大盤區間漲跌幅", _fmt_pct(row.get("大盤區間漲跌幅_%", ""))],
+    ]
+
+    return "\n".join(
+        [
+            "### 大盤脈絡（加權指數 TAIEX）",
+            _md_table(["項目", "數值"], market_rows),
         ]
     )
 
@@ -223,6 +248,10 @@ def build_chip_tables_markdown(
         "### 當日籌碼面",
         _md_table(["項目", "數值"], _build_chip_face_rows(row)),
     ]
+
+    market_md = build_market_context_markdown(row)
+    if market_md:
+        sections.extend(["", market_md])
 
     trend_md = build_trend_summary_markdown(row)
     if trend_md:

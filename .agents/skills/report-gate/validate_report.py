@@ -53,6 +53,27 @@ def validate_facts(body: str, facts) -> list["ValidationIssue"]:
     ]
 
 
+def validate_reasoning(
+    body: str,
+    facts,
+    *,
+    has_news: bool,
+    news_titles: list[str] | None = None,
+) -> list[ValidationIssue]:
+    """Reasoning-quality layer (delegates to shared ``reasoning_checks``)."""
+    from reasoning_checks import run_reasoning_checks
+
+    return [
+        ValidationIssue(code, message)
+        for code, message in run_reasoning_checks(
+            body,
+            facts,
+            has_news=has_news,
+            news_titles=news_titles,
+        )
+    ]
+
+
 def _has_markdown_table(text: str) -> bool:
     return bool(re.search(r"^\|.+\|\s*$", text, re.MULTILINE))
 
@@ -91,6 +112,7 @@ def validate_single_stock_report(
     *,
     facts=None,
     has_news: bool,
+    news_titles: list[str] | None = None,
 ) -> ValidationResult:
     issues: list[ValidationIssue] = []
     text = body.strip()
@@ -193,5 +215,10 @@ def validate_single_stock_report(
             )
 
     issues.extend(validate_facts(text, facts))
+    issues.extend(
+        validate_reasoning(
+            text, facts, has_news=has_news, news_titles=news_titles
+        )
+    )
 
     return ValidationResult(passed=not issues, issues=issues)

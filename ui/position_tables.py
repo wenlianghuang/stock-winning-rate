@@ -47,8 +47,8 @@ def build_position_summary_markdown(
         if close_price is not None
         else None
     )
-    ma5_raw = str(row.get("MA5", "")).strip()
-    ma5_dev = str(row.get("收盤偏離MA5_%", "")).strip()
+    ma20_raw = str(row.get("MA20", "")).strip()
+    ma20_dev = str(row.get("收盤偏離MA20_%", "")).strip()
 
     rows: list[list[str]] = [
         ["持股均價（元）", _fmt_num(holding.avg_cost)],
@@ -59,10 +59,10 @@ def build_position_summary_markdown(
         rows.append(["未實現損益", f"{pnl_pct:+.2f}%"])
         cost_diff = (close_price or 0) - holding.avg_cost
         rows.append(["現價 vs 均價（元）", _fmt_num(cost_diff, signed=True)])
-    if ma5_raw:
-        rows.append(["MA5", ma5_raw])
-    if ma5_dev:
-        rows.append(["收盤偏離 MA5", f"{ma5_dev}%"])
+    if ma20_raw:
+        rows.append(["MA20（月線）", ma20_raw])
+    if ma20_dev:
+        rows.append(["收盤偏離 MA20", f"{ma20_dev}%"])
     if holding.note.strip():
         rows.append(["備註", holding.note.strip()])
 

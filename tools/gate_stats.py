@@ -78,6 +78,8 @@ class Stats:
     layered_rounds: int = 0
     format_fail: int = 0
     facts_fail: int = 0
+    reasoning_fail: int = 0
+    position_fail: int = 0
     legacy_rounds: int = 0  # entries without issue_codes/layers
 
     def add_run(self, run: list[dict]) -> None:
@@ -106,6 +108,10 @@ class Stats:
                     self.format_fail += 1
                 if layers.get("facts") == "fail":
                     self.facts_fail += 1
+                if layers.get("reasoning") == "fail":
+                    self.reasoning_fail += 1
+                if layers.get("position") == "fail":
+                    self.position_fail += 1
 
     @property
     def round1_pass_rate(self) -> float:
@@ -137,6 +143,8 @@ class Stats:
             "layer_failures": {
                 "format": self.format_fail,
                 "facts": self.facts_fail,
+                "reasoning": self.reasoning_fail,
+                "position": self.position_fail,
                 "layered_rounds": self.layered_rounds,
             },
             "top_issue_codes": self.issue_codes.most_common(top_n),
@@ -168,9 +176,17 @@ def _format_section(title: str, stats: Stats, *, top_n: int) -> str:
         f"- 平均每輪耗時：{stats.avg_duration:.1f}s",
     ]
     if stats.layered_rounds:
+        parts = [
+            f"format {stats.format_fail}",
+            f"facts {stats.facts_fail}",
+        ]
+        if stats.reasoning_fail:
+            parts.append(f"reasoning {stats.reasoning_fail}")
+        if stats.position_fail:
+            parts.append(f"position {stats.position_fail}")
         lines.append(
             f"- 分層失敗（近期含 layers 的 {stats.layered_rounds} 輪）："
-            f"format {stats.format_fail}、facts {stats.facts_fail}"
+            + "、".join(parts)
         )
     if stats.issue_codes:
         lines.append("- 最常見 issue code：")

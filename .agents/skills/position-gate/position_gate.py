@@ -25,7 +25,7 @@ from holdings import (
 )
 from validate_position_report import ValidationResult, validate_position_report
 
-MAX_ROUNDS_DEFAULT = 3
+MAX_ROUNDS_DEFAULT = 5
 AGY_TIMEOUT_SEC = 900
 EXIT_OK = 0
 EXIT_VALIDATION_FAILED = 1
@@ -106,6 +106,30 @@ def _to_holding_info(record: HoldingRecord):
     )
 
 
+def _load_position_facts(csv_path: Path, row: dict[str, str], holding: HoldingRecord):
+    """Compute deterministic position facts (pnl bucket, cost vs MA20, bias)."""
+    _ensure_import_paths()
+    from position_signals import (
+        build_position_facts,
+        position_facts_summary_for_prompt,
+        write_position_facts_json,
+    )
+
+    pfacts = build_position_facts(
+        row,
+        stock_id=str(row.get("代碼", holding.stock_id)).strip(),
+        stock_name=str(row.get("名稱", holding.stock_id)).strip(),
+        avg_cost=holding.avg_cost,
+        shares=holding.shares,
+    )
+    facts_path = csv_path.with_name(f"{csv_path.stem}.position.facts.json")
+    try:
+        write_position_facts_json(facts_path, pfacts)
+    except OSError:
+        pass
+    return pfacts, position_facts_summary_for_prompt(pfacts)
+
+
 def parse_csv_row(csv_path: Path) -> dict[str, str]:
     text = csv_path.read_text(encoding="utf-8-sig")
     rows = list(csv.DictReader(StringIO(text)))
@@ -159,6 +183,7 @@ def build_initial_prompt(
     facts_summary: str,
     news_text: str | None,
     user_prompt: str,
+    position_facts_summary: str | None = None,
 ) -> str:
     _ensure_import_paths()
     from position_prompts import build_position_analysis_prompt_suffix
@@ -194,6 +219,7 @@ def build_initial_prompt(
         close_price=close_price,
         news_section=news_section,
         market_report_path=str(market_md) if market_md else None,
+        position_facts_summary=position_facts_summary,
     )
     return f"使用者請求：{user_prompt}\n\n{suffix}\n"
 
@@ -201,11 +227,27 @@ def build_initial_prompt(
 POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_foreign_direction": "市場面外資方向與系統 facts 相反，請改為與 facts 一致的買/賣方向",
     "fact_ma5_position": "市場面對 MA5 站上/跌破的描述與 facts 相反，請依 facts 修正",
+    "fact_ma20_position": "市場面對 MA20（月線）站上/跌破的描述與 facts 相反，請依 facts 修正",
+    "fact_ma_alignment_mismatch": "短中線均線排列（MA5 vs MA20）敘述與 facts 矛盾，請依系統判定修正",
+    "fact_volume_mismatch": "成交量描述與 facts（放量/縮量）矛盾，請依系統量能判定修正",
+    "fact_price_trend_mismatch": "區間價格趨勢描述與 facts 矛盾，請依區間漲跌方向修正",
     "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，市場面不可描述為籌碼健康",
+    "fact_chip_regime_mismatch": "市場面籌碼型態敘述與 facts 的 chip_regime 矛盾",
+    "fact_institutional_mismatch": "三大法人共識敘述與 facts 矛盾",
+    "fact_major_foreign_ignored": "市場面須說明主力與外資的方向背離",
+    "fact_market_rs_mismatch": "個股相對大盤強弱與 facts 矛盾，請依 rs（強於/弱於/同步大盤）修正抗跌/補跌等描述",
     "anchors_underused": "市場面須明確引用系統 facts 概念（至少 2 項）",
-    "position_loss_no_risk_control": "此部位虧損逾門檻，操作情境必須提出停損/減碼/風險控管方向",
+    "position_loss_no_risk_control": "此部位虧損，操作情境必須提出停損/減碼/出場/攤平前提等防禦手段",
+    "position_profit_no_protection": "此部位大幅獲利，操作情境須談停利/移動停損/獲利了結，或明確論證續抱理由",
+    "position_profit_no_plan": "此部位小幅獲利，操作情境須談加碼條件/停利/續抱或獲利回吐風險",
+    "position_breakeven_no_trigger": "此部位接近損益兩平，操作情境須給明確的出場或加碼觸發條件",
+    "position_scenario_unanchored": "操作情境須錨定部位損益（獲利/虧損/成本/均價/套牢），勿泛泛而談",
     "missing_action_direction": "操作情境須提及觀望/減碼/加碼/停損/獲利了結/持有等方向",
     "missing_trigger_conditions": "操作情境須補上觸發條件或可觀察訊號",
+    "reasoning_cross_no_evidence": "部位與市場交叉對照須同時引用籌碼與新聞/市場依據",
+    "reasoning_scenario_no_trigger": "操作情境須寫明觸發條件（若…則…）",
+    "reasoning_trend_no_continuation": "外資連續買賣時，市場面須描述延續/轉折/背離",
+    "reasoning_major_foreign_unmentioned": "主力與外資背離時，市場面或交叉段須點出分歧",
 }
 
 
@@ -225,21 +267,30 @@ def build_fix_prompt(
     news_text: str | None,
     previous_body: str,
     validation: ValidationResult,
+    position_facts_summary: str | None = None,
 ) -> str:
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", stock_id)).strip()
     issues = _targeted_fix_lines(validation)
     news_note = "系統已提供新聞" if news_text else "系統未取得新聞，請註明"
+    position_state_block = (
+        f"=== 部位狀態（操作情境須對齊）===\n{position_facts_summary}\n"
+        f"=== 部位狀態結束 ===\n\n"
+        if position_facts_summary
+        else ""
+    )
     return (
         f"上一版「{stock_name}（{stock_id}）」持股部位報告未通過自動驗證。\n"
         f"請依下列問題修正後，輸出完整新版報告正文到 stdout（Markdown）。\n\n"
         f"=== 系統籌碼事實（facts，市場面方向以此為準）===\n{facts_summary}\n"
         f"=== facts 結束 ===\n\n"
+        f"{position_state_block}"
         f"驗證問題（含修正指引）：\n{issues}\n\n"
         f"持股均價：{holding.avg_cost} 元，{holding.shares:,} 股\n"
         f"新聞狀態：{news_note}\n\n"
         "修正要求：\n"
-        "- 市場面方向（外資買/賣、站上/跌破 MA5）必須與 facts 一致\n"
+        "- 市場面方向（外資買/賣、站上/跌破 MA5）必須與籌碼 facts 一致\n"
+        "- 部位現況須對齊系統試算的 MA20（月線）與持股均價關係\n"
         "- 市場面須明確引用 facts 概念（至少 2 項）\n"
         "- 籌碼與部位數字由系統表格自動產生，正文勿重複列數字\n"
         "- 須含部位現況、市場面摘要、交叉對照、操作情境、風險提醒、免責聲明\n"
@@ -285,7 +336,9 @@ def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, in
     return body, result.returncode
 
 
-FACT_ISSUE_PREFIXES = ("fact_", "anchors_", "position_")
+FACT_ISSUE_PREFIXES = ("fact_", "anchors_")
+POSITION_ISSUE_PREFIX = "position_"
+REASONING_ISSUE_PREFIX = "reasoning_"
 
 
 def _layer_status(validation: ValidationResult) -> dict[str, str]:
@@ -295,14 +348,28 @@ def _layer_status(validation: ValidationResult) -> dict[str, str]:
         for issue in validation.issues
         if issue.code.startswith(FACT_ISSUE_PREFIXES)
     ]
+    position_codes = [
+        issue.code
+        for issue in validation.issues
+        if issue.code.startswith(POSITION_ISSUE_PREFIX)
+    ]
+    reasoning_codes = [
+        issue.code
+        for issue in validation.issues
+        if issue.code.startswith(REASONING_ISSUE_PREFIX)
+    ]
     format_codes = [
         issue.code
         for issue in validation.issues
         if not issue.code.startswith(FACT_ISSUE_PREFIXES)
+        and not issue.code.startswith(POSITION_ISSUE_PREFIX)
+        and not issue.code.startswith(REASONING_ISSUE_PREFIX)
     ]
     return {
         "format": "fail" if format_codes else "pass",
         "facts": "fail" if fact_codes else "pass",
+        "position": "fail" if position_codes else "pass",
+        "reasoning": "fail" if reasoning_codes else "pass",
     }
 
 
@@ -446,6 +513,7 @@ def run_gate(
 ) -> int:
     row = parse_csv_row(csv_path)
     facts, facts_summary = _load_chip_facts(csv_path)
+    position_facts, position_facts_summary = _load_position_facts(csv_path, row, holding)
     news_text = fetch_news_text(row)
     has_news = bool(news_text and news_text.strip())
     log_path = csv_path.with_name(f"{csv_path.stem}.position.gate.log")
@@ -460,7 +528,12 @@ def run_gate(
             return EXIT_CSV_MISSING
         body = extract_body_from_saved_md(md_path)
         validation = validate_position_report(
-            body, row, holding, facts=facts, has_news=has_news
+            body,
+            row,
+            holding,
+            facts=facts,
+            position_facts=position_facts,
+            has_news=has_news,
         )
         _print_validation(validation, round_no=0)
         return EXIT_OK if validation.passed else EXIT_VALIDATION_FAILED
@@ -477,16 +550,34 @@ def run_gate(
 
         if round_no == 1:
             prompt = build_initial_prompt(
-                csv_path, row, holding, facts_summary, news_text, user_prompt
+                csv_path,
+                row,
+                holding,
+                facts_summary,
+                news_text,
+                user_prompt,
+                position_facts_summary=position_facts_summary,
             )
         else:
             prompt = build_fix_prompt(
-                csv_path, row, holding, facts_summary, news_text, body, validation
+                csv_path,
+                row,
+                holding,
+                facts_summary,
+                news_text,
+                body,
+                validation,
+                position_facts_summary=position_facts_summary,
             )
 
         body, agy_exit = run_agy(prompt)
         validation = validate_position_report(
-            body, row, holding, facts=facts, has_news=has_news
+            body,
+            row,
+            holding,
+            facts=facts,
+            position_facts=position_facts,
+            has_news=has_news,
         )
         duration = time.time() - round_started
 

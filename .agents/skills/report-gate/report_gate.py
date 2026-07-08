@@ -18,7 +18,7 @@ from pathlib import Path
 
 from validate_report import ValidationResult, validate_single_stock_report
 
-MAX_ROUNDS_DEFAULT = 3
+MAX_ROUNDS_DEFAULT = 5
 AGY_TIMEOUT_SEC = 900
 EXIT_OK = 0
 EXIT_VALIDATION_FAILED = 1
@@ -157,9 +157,23 @@ def build_initial_prompt(
 FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_foreign_direction": "外資方向與系統 facts 相反，請改為與 facts 一致的買/賣方向描述",
     "fact_ma5_position": "收盤相對 MA5 的位置與 facts 相反，請依 facts 修正站上/跌破描述",
+    "fact_ma20_position": "收盤相對 MA20（月線）的位置與 facts 相反，請依 facts 修正站上/跌破月線描述",
+    "fact_ma_alignment_mismatch": "短中線均線排列（MA5 vs MA20）敘述與 facts 矛盾，請依系統判定的短中線方向修正",
+    "fact_volume_mismatch": "成交量描述與 facts（放量/縮量）矛盾，請依系統量能判定修正",
+    "fact_price_trend_mismatch": "區間價格趨勢描述與 facts（price_trend）矛盾，請依區間漲跌方向修正",
     "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，正文不可描述為籌碼健康或量價配合良好",
+    "fact_chip_regime_mismatch": "籌碼型態敘述與 facts 的 chip_regime 矛盾，請依系統判定修正",
+    "fact_institutional_mismatch": "三大法人共識敘述與 facts 矛盾，請依 institutional_consensus 修正",
+    "fact_major_foreign_ignored": "須在趨勢/交叉段說明主力與外資的方向背離",
+    "fact_market_rs_mismatch": "個股相對大盤強弱與 facts 矛盾，請依 rs（強於/弱於/同步大盤）修正抗跌/補跌等描述",
     "anchors_underused": "正文引用的系統 anchors 不足，請在趨勢/交叉對照章節明確引用至少 2 條 anchors",
     "missing_trend_analysis": "請補「近 N 日籌碼趨勢」章節，明確描述延續/轉折/背離",
+    "reasoning_cross_no_evidence": "交叉對照須同時引用籌碼與新聞依據，說明一致或背離",
+    "reasoning_scenario_no_trigger": "情境推演須寫明觸發條件（若…則…）與可觀察訊號",
+    "reasoning_trend_no_continuation": "外資有連續買賣時，趨勢段須描述延續/轉折/背離",
+    "reasoning_major_foreign_unmentioned": "主力與外資背離時，趨勢或交叉段須點出分歧",
+    "reasoning_watch_not_actionable": "觀察重點須含可追蹤指標（外資/均線/成交量等）",
+    "reasoning_news_uncited": "請在交叉對照或趨勢段引用至少一則新聞標題關鍵字",
 }
 
 
@@ -240,6 +254,7 @@ def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, in
 
 
 FACT_ISSUE_PREFIXES = ("fact_", "anchors_")
+REASONING_ISSUE_PREFIX = "reasoning_"
 
 
 def _layer_status(validation: ValidationResult) -> dict[str, str]:
@@ -249,14 +264,21 @@ def _layer_status(validation: ValidationResult) -> dict[str, str]:
         for issue in validation.issues
         if issue.code.startswith(FACT_ISSUE_PREFIXES)
     ]
+    reasoning_codes = [
+        issue.code
+        for issue in validation.issues
+        if issue.code.startswith(REASONING_ISSUE_PREFIX)
+    ]
     format_codes = [
         issue.code
         for issue in validation.issues
         if not issue.code.startswith(FACT_ISSUE_PREFIXES)
+        and not issue.code.startswith(REASONING_ISSUE_PREFIX)
     ]
     return {
         "format": "fail" if format_codes else "pass",
         "facts": "fail" if fact_codes else "pass",
+        "reasoning": "fail" if reasoning_codes else "pass",
     }
 
 
@@ -409,6 +431,10 @@ def run_gate(
     facts, facts_summary = _load_chip_facts(csv_path)
     news_text = fetch_news_text(row)
     has_news = bool(news_text and news_text.strip())
+    _ensure_import_paths()
+    from reasoning_checks import parse_news_titles
+
+    news_titles = parse_news_titles(news_text)
     log_path = csv_path.with_suffix(".gate.log")
     gate_started = time.time()
     round_summaries: list[dict] = []
@@ -420,7 +446,7 @@ def run_gate(
             return EXIT_CSV_MISSING
         body = extract_body_from_saved_md(md_path)
         validation = validate_single_stock_report(
-            body, row, facts=facts, has_news=has_news
+            body, row, facts=facts, has_news=has_news, news_titles=news_titles
         )
         _print_validation(validation, round_no=0)
         return EXIT_OK if validation.passed else EXIT_VALIDATION_FAILED
@@ -443,7 +469,11 @@ def run_gate(
 
         body, agy_exit = run_agy(prompt)
         validation = validate_single_stock_report(
-            body, row, facts=facts, has_news=has_news
+            body,
+            row,
+            facts=facts,
+            has_news=has_news,
+            news_titles=news_titles,
         )
         duration = time.time() - round_started
 

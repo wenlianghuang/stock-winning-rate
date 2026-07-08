@@ -58,7 +58,89 @@ MA5_BELOW_PHRASES = (
     "失守均線",
     "跌破5日線",
     "跌破5日均線",
+)
+MA20_ABOVE_PHRASES = (
+    "站上MA20",
+    "站上月線",
+    "站回月線",
+    "收復月線",
+    "站穩月線",
+    "突破月線",
+    "站上20日線",
+)
+MA20_BELOW_PHRASES = (
+    "跌破MA20",
     "跌破月線",
+    "失守月線",
+    "跌破20日線",
+    "月線下方",
+    "月線之下",
+)
+# 短中線均線排列（MA5 vs MA20）用語
+MA_ALIGN_BULLISH_PHRASES = (
+    "多頭排列",
+    "均線多頭",
+    "短中線偏多",
+    "短中線同步偏多",
+    "均線上揚",
+)
+MA_ALIGN_BEARISH_PHRASES = (
+    "空頭排列",
+    "均線空頭",
+    "短中線偏空",
+    "短中線同步偏空",
+    "均線下彎",
+)
+# short_rebound：站上 MA5 但仍在 MA20 下，不可寫成同步偏多或中期已轉強
+MA_ALIGN_REBOUND_DENY_PHRASES = MA_ALIGN_BULLISH_PHRASES + (
+    "中期轉強",
+    "月線站穩",
+    "月線已站",
+    "中期偏多",
+    "中期已轉強",
+)
+# short_pullback：跌破 MA5 但仍在 MA20 上，不可寫成同步偏空或中期已轉弱
+MA_ALIGN_PULLBACK_DENY_PHRASES = MA_ALIGN_BEARISH_PHRASES + (
+    "中期轉弱",
+    "月線失守",
+    "中期偏空",
+    "中期已轉弱",
+)
+VOLUME_SPIKE_PHRASES = (
+    "放量",
+    "量能放大",
+    "成交量放大",
+    "爆量",
+    "量能激增",
+    "成交量大增",
+    "量能明顯放大",
+)
+VOLUME_SHRINK_PHRASES = (
+    "量縮",
+    "縮量",
+    "量能萎縮",
+    "交投清淡",
+    "量能不足",
+    "成交量萎縮",
+    "量能明顯萎縮",
+)
+PRICE_PERIOD_UP_PHRASES = (
+    "區間上漲",
+    "區間走強",
+    "區間偏多",
+    "區間漲幅",
+    "走勢偏強",
+    "區間強勢上漲",
+    "區間呈現上漲",
+)
+PRICE_PERIOD_DOWN_PHRASES = (
+    "區間下跌",
+    "區間走弱",
+    "區間偏空",
+    "區間跌幅",
+    "走勢偏弱",
+    "區間弱勢下跌",
+    "區間呈現下跌",
 )
 CHIP_HEALTHY_PHRASES = (
     "籌碼健康",
@@ -67,6 +149,51 @@ CHIP_HEALTHY_PHRASES = (
     "籌碼穩定",
     "籌碼結構良好",
     "籌碼面樂觀",
+)
+CHIP_ACCUMULATION_PHRASES = (
+    "籌碼集中",
+    "籌碼沈澱",
+    "吸籌",
+    "法人布局",
+    "籌碼偏多",
+    "籌碼面佳",
+)
+CHIP_DISTRIBUTION_PHRASES = (
+    "籌碼鬆動",
+    "籌碼發散",
+    "賣壓沉重",
+    "籌碼偏空",
+    "籌碼轉弱",
+    "出貨",
+)
+INSTITUTIONAL_BULLISH_PHRASES = (
+    "法人一致買",
+    "三大法人買超",
+    "法人同步買",
+    "法人偏多",
+)
+INSTITUTIONAL_BEARISH_PHRASES = (
+    "法人一致賣",
+    "三大法人賣超",
+    "法人同步賣",
+    "法人偏空",
+)
+# 個股表現相對大盤（加權指數）的用語
+MARKET_OUTPERFORM_PHRASES = (
+    "強於大盤",
+    "優於大盤",
+    "相對強勢",
+    "抗跌",
+    "領先大盤",
+    "表現優於大盤",
+)
+MARKET_UNDERPERFORM_PHRASES = (
+    "弱於大盤",
+    "落後大盤",
+    "相對弱勢",
+    "補跌",
+    "表現弱於大盤",
+    "走勢弱於大盤",
 )
 
 FactIssue = tuple[str, str]
@@ -145,10 +272,20 @@ def _count_fact_citations(text: str, facts) -> tuple[int, int]:
         concepts.append(
             "MA5" in text or "均線" in text or "5日線" in text or "5 日線" in text
         )
+    if getattr(facts, "ma20_position", "unknown") in {"above", "below"}:
+        concepts.append("MA20" in text or "月線" in text or "20日線" in text)
     if getattr(facts, "price_trend", "unknown") in {"up", "down"}:
         concepts.append("區間" in text or "趨勢" in text)
     if getattr(facts, "divergences", None):
         concepts.append("背離" in text)
+    if getattr(facts, "institutional_consensus", "unknown") in {"bullish", "bearish"}:
+        concepts.append("法人" in text or "三大法人" in text)
+    if getattr(facts, "major_foreign_divergence", False):
+        concepts.append("背離" in text or "分歧" in text)
+    if getattr(facts, "chip_regime", "unknown") in {"accumulation", "distribution"}:
+        concepts.append("籌碼" in text or "法人" in text)
+    if getattr(facts, "volume_anomaly", "unknown") in {"spike", "shrink"}:
+        concepts.append("成交量" in text or "量能" in text)
 
     total = len(concepts)
     cited = sum(1 for hit in concepts if hit)
@@ -212,6 +349,113 @@ def run_fact_checks(
                 )
             )
 
+    ma20_position = getattr(facts, "ma20_position", "unknown")
+    if ma20_position in {"above", "below"}:
+        above = _contains_any(region, MA20_ABOVE_PHRASES)
+        below = _contains_any(region, MA20_BELOW_PHRASES)
+        if ma20_position == "below" and above and not below:
+            issues.append(
+                (
+                    "fact_ma20_position",
+                    f"收盤低於 MA20（月線），但現況段出現「{above}」，與系統 facts 矛盾",
+                )
+            )
+        elif ma20_position == "above" and below and not above:
+            issues.append(
+                (
+                    "fact_ma20_position",
+                    f"收盤高於 MA20（月線），但現況段出現「{below}」，與系統 facts 矛盾",
+                )
+            )
+
+    ma_alignment = getattr(facts, "ma_alignment", "unknown")
+    if ma_alignment in {"bullish", "bearish", "short_rebound", "short_pullback"}:
+        stripped = _strip_tables(text)
+        if ma_alignment == "bullish":
+            bull = _contains_any(stripped, MA_ALIGN_BULLISH_PHRASES)
+            bear = _contains_any(stripped, MA_ALIGN_BEARISH_PHRASES)
+            if bear and not bull:
+                issues.append(
+                    (
+                        "fact_ma_alignment_mismatch",
+                        f"facts 判定短中線同步偏多（站上 MA5/MA20），正文卻描述「{bear}」，與均線位置矛盾",
+                    )
+                )
+        elif ma_alignment == "bearish":
+            bull = _contains_any(stripped, MA_ALIGN_BULLISH_PHRASES)
+            bear = _contains_any(stripped, MA_ALIGN_BEARISH_PHRASES)
+            if bull and not bear:
+                issues.append(
+                    (
+                        "fact_ma_alignment_mismatch",
+                        f"facts 判定短中線同步偏空（跌破 MA5/MA20），正文卻描述「{bull}」，與均線位置矛盾",
+                    )
+                )
+        elif ma_alignment == "short_rebound":
+            deny = _contains_any(stripped, MA_ALIGN_REBOUND_DENY_PHRASES)
+            if deny:
+                issues.append(
+                    (
+                        "fact_ma_alignment_mismatch",
+                        f"facts 判定短線反彈、中期仍弱（站上 MA5 但仍在 MA20 下），"
+                        f"正文卻描述「{deny}」，與短中線型態矛盾",
+                    )
+                )
+        elif ma_alignment == "short_pullback":
+            deny = _contains_any(stripped, MA_ALIGN_PULLBACK_DENY_PHRASES)
+            if deny:
+                issues.append(
+                    (
+                        "fact_ma_alignment_mismatch",
+                        f"facts 判定短線回檔、中期仍強（跌破 MA5 但仍在 MA20 上），"
+                        f"正文卻描述「{deny}」，與短中線型態矛盾",
+                    )
+                )
+
+    volume_anomaly = getattr(facts, "volume_anomaly", "unknown")
+    if volume_anomaly in {"spike", "shrink"}:
+        stripped = _strip_tables(text)
+        if volume_anomaly == "spike":
+            shrink = _contains_any(stripped, VOLUME_SHRINK_PHRASES)
+            spike = _contains_any(stripped, VOLUME_SPIKE_PHRASES)
+            if shrink and not spike:
+                issues.append(
+                    (
+                        "fact_volume_mismatch",
+                        f"facts 判定成交量明顯放大，正文卻描述「{shrink}」，與量能 facts 矛盾",
+                    )
+                )
+        elif volume_anomaly == "shrink":
+            spike = _contains_any(stripped, VOLUME_SPIKE_PHRASES)
+            shrink = _contains_any(stripped, VOLUME_SHRINK_PHRASES)
+            if spike and not shrink:
+                issues.append(
+                    (
+                        "fact_volume_mismatch",
+                        f"facts 判定成交量明顯萎縮，正文卻描述「{spike}」，與量能 facts 矛盾",
+                    )
+                )
+
+    price_trend = getattr(facts, "price_trend", "unknown")
+    if price_trend in {"up", "down"}:
+        stripped = _strip_tables(text)
+        up = _contains_any(stripped, PRICE_PERIOD_UP_PHRASES)
+        down = _contains_any(stripped, PRICE_PERIOD_DOWN_PHRASES)
+        if price_trend == "up" and down and not up:
+            issues.append(
+                (
+                    "fact_price_trend_mismatch",
+                    f"facts 判定區間價格偏多（上漲），正文卻描述「{down}」，與 price_trend 矛盾",
+                )
+            )
+        elif price_trend == "down" and up and not down:
+            issues.append(
+                (
+                    "fact_price_trend_mismatch",
+                    f"facts 判定區間價格偏空（下跌），正文卻描述「{up}」，與 price_trend 矛盾",
+                )
+            )
+
     if getattr(facts, "divergences", None):
         hit = _contains_any(_strip_tables(text), CHIP_HEALTHY_PHRASES)
         if hit:
@@ -219,6 +463,84 @@ def run_fact_checks(
                 (
                     "fact_divergence_ignored",
                     f"facts 已標記量價背離/風險旗標，正文卻描述「{hit}」",
+                )
+            )
+
+    chip_regime = getattr(facts, "chip_regime", "unknown")
+    if chip_regime == "distribution":
+        hit = _contains_any(_strip_tables(text), CHIP_ACCUMULATION_PHRASES)
+        if hit:
+            issues.append(
+                (
+                    "fact_chip_regime_mismatch",
+                    f"facts 判定籌碼偏空（distribution），正文卻描述「{hit}」",
+                )
+            )
+    elif chip_regime == "accumulation":
+        hit = _contains_any(_strip_tables(text), CHIP_DISTRIBUTION_PHRASES)
+        if hit and not _contains_any(_strip_tables(text), ("風險", "留意", "但")):
+            issues.append(
+                (
+                    "fact_chip_regime_mismatch",
+                    f"facts 判定籌碼偏多（accumulation），正文卻描述「{hit}」且未提及風險",
+                )
+            )
+
+    consensus = getattr(facts, "institutional_consensus", "unknown")
+    if consensus == "bearish":
+        bull = _contains_any(region, INSTITUTIONAL_BULLISH_PHRASES)
+        bear = _contains_any(region, INSTITUTIONAL_BEARISH_PHRASES)
+        if bull and not bear:
+            issues.append(
+                (
+                    "fact_institutional_mismatch",
+                    f"三大法人一致賣超，但現況段出現「{bull}」，與 facts 矛盾",
+                )
+            )
+    elif consensus == "bullish":
+        bull = _contains_any(region, INSTITUTIONAL_BULLISH_PHRASES)
+        bear = _contains_any(region, INSTITUTIONAL_BEARISH_PHRASES)
+        if bear and not bull:
+            issues.append(
+                (
+                    "fact_institutional_mismatch",
+                    f"三大法人一致買超，但現況段出現「{bear}」，與 facts 矛盾",
+                )
+            )
+
+    if getattr(facts, "major_foreign_divergence", False):
+        trend_cross = _strip_tables(
+            _slice_after_keywords(text, ("趨勢", "交叉", "對照", "市場面"))
+        )
+        if trend_cross.strip() and not any(
+            keyword in trend_cross for keyword in ("背離", "分歧", "不同步")
+        ):
+            issues.append(
+                (
+                    "fact_major_foreign_ignored",
+                    "facts 標記主力與外資方向背離，正文須在趨勢/交叉段說明此分歧",
+                )
+            )
+
+    rs = getattr(facts, "rs_period", "unknown")
+    if rs == "unknown":
+        rs = getattr(facts, "rs_today", "unknown")
+    if rs in {"outperform", "underperform"}:
+        stripped = _strip_tables(text)
+        strong = _contains_any(stripped, MARKET_OUTPERFORM_PHRASES)
+        weak = _contains_any(stripped, MARKET_UNDERPERFORM_PHRASES)
+        if rs == "underperform" and strong and not weak:
+            issues.append(
+                (
+                    "fact_market_rs_mismatch",
+                    f"個股相對大盤為弱勢，但正文描述「{strong}」，與 facts 相對強弱矛盾",
+                )
+            )
+        elif rs == "outperform" and weak and not strong:
+            issues.append(
+                (
+                    "fact_market_rs_mismatch",
+                    f"個股相對大盤為強勢，但正文描述「{weak}」，與 facts 相對強弱矛盾",
                 )
             )
 
