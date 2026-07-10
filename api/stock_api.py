@@ -32,6 +32,7 @@ STOCK_SCRIPT = ROOT / ".agents" / "skills" / "tw-stock-report" / "fetch_chip_rep
 GATE_SCRIPT = ROOT / ".agents" / "skills" / "report-gate" / "report_gate.py"
 POSITION_SCRIPT = ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py"
 STOCK_ROOT = ROOT / "reports" / "stock"
+CHART_LOOKBACK_DAYS = 60
 
 AGY_TIMEOUT_SEC = 900
 
@@ -60,6 +61,8 @@ class Job:
     position_markdown: str | None = None
     md_path: str | None = None
     csv_path: str | None = None
+    facts_json: dict[str, Any] | None = None
+    history_json: list[dict[str, Any]] | None = None
     skip_pdf: bool = True
     is_holding: bool = False
     share_count: int | None = None
@@ -235,6 +238,107 @@ def _find_csv_path(stock_id: str, trade_date: str | None) -> Path | None:
     return matches[-1] if matches else None
 
 
+def _find_facts_path(stock_id: str, trade_date: str | None) -> Path | None:
+    if trade_date:
+        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.facts.json"
+        return candidate if candidate.exists() else None
+
+    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.facts.json"))
+    return matches[-1] if matches else None
+
+
+def _find_history_path(stock_id: str, trade_date: str | None) -> Path | None:
+    if trade_date:
+        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}_history.csv"
+        return candidate if candidate.exists() else None
+
+    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}_history.csv"))
+    return matches[-1] if matches else None
+
+
+def _find_chart_history_path(stock_id: str, trade_date: str | None) -> Path | None:
+    if trade_date:
+        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}_chart_history.csv"
+        return candidate if candidate.exists() else None
+
+    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}_chart_history.csv"))
+    return matches[-1] if matches else None
+
+
+def _resolve_history_path(stock_id: str, trade_date: str | None) -> Path | None:
+    chart_path = _find_chart_history_path(stock_id, trade_date)
+    if chart_path is not None:
+        return chart_path
+    return _find_history_path(stock_id, trade_date)
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text or text in {"--", "nan", "None"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _to_int(value: Any) -> int | None:
+    parsed = _to_float(value)
+    if parsed is None:
+        return None
+    return int(parsed)
+
+
+def _load_facts_json(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _load_history_for_api(path: Path | None) -> list[dict[str, Any]] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return None
+    try:
+        rows = list(csv.DictReader(text.splitlines()))
+    except csv.Error:
+        return None
+
+    history: list[dict[str, Any]] = []
+    for row in rows:
+        date = str(row.get("日期", "")).strip()
+        close = _to_float(row.get("收盤價"))
+        if not date or close is None:
+            continue
+        entry: dict[str, Any] = {"date": date, "close": close}
+        open_price = _to_float(row.get("開盤價"))
+        if open_price is not None:
+            entry["open"] = open_price
+        high = _to_float(row.get("最高價"))
+        if high is not None:
+            entry["high"] = high
+        low = _to_float(row.get("最低價"))
+        if low is not None:
+            entry["low"] = low
+        volume = _to_int(row.get("成交量_張"))
+        if volume is not None:
+            entry["volume"] = volume
+        change_pct = _to_float(row.get("漲跌幅"))
+        if change_pct is not None:
+            entry["change_pct"] = change_pct
+        history.append(entry)
+    return history or None
+
+
 def _infer_trade_date(stock_id: str) -> str | None:
     csv_path = _find_csv_path(stock_id, None)
     if csv_path is None:
@@ -268,7 +372,7 @@ def _run_pipeline(job_id: str) -> None:
         with _jobs_lock:
             _update_job(job, status=JobStatus.FETCHING, error=None)
 
-        stock_args = ["--stocks", stock_id]
+        stock_args = ["--stocks", stock_id, "--chart-lookback-days", str(CHART_LOOKBACK_DAYS)]
         if job.requested_trade_date:
             stock_args.extend(["--date", job.requested_trade_date])
         _run_script(STOCK_SCRIPT, stock_args)
@@ -299,6 +403,10 @@ def _run_pipeline(job_id: str) -> None:
 
         markdown = md_path.read_text(encoding="utf-8")
         csv_path = _find_csv_path(stock_id, trade_date)
+        facts_path = _find_facts_path(stock_id, trade_date)
+        history_path = _resolve_history_path(stock_id, trade_date)
+        facts_json = _load_facts_json(facts_path)
+        history_json = _load_history_for_api(history_path)
 
         position_markdown: str | None = None
         if job.is_holding:
@@ -333,6 +441,8 @@ def _run_pipeline(job_id: str) -> None:
                 position_markdown=position_markdown,
                 md_path=str(md_path.resolve()),
                 csv_path=str(csv_path.resolve()) if csv_path else None,
+                facts_json=facts_json,
+                history_json=history_json,
                 trade_date=trade_date or md_path.parent.name,
                 stock_name=stock_name,
                 error=None,
@@ -417,6 +527,8 @@ def create_app() -> FastAPI:
         if job.status != JobStatus.DONE:
             payload.pop("markdown", None)
             payload.pop("position_markdown", None)
+            payload.pop("facts_json", None)
+            payload.pop("history_json", None)
         return {"job": payload}
 
     return app

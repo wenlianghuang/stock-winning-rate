@@ -28,6 +28,7 @@ YAHOO_USER_AGENT = (
 DEFAULT_WATCHLIST = Path(__file__).with_name("watchlist.txt")
 SHARES_PER_LOT = 1000
 DEFAULT_LOOKBACK_DAYS = 5
+DEFAULT_CHART_LOOKBACK_DAYS = 60
 MA5_PERIOD = 5
 MA10_PERIOD = 10
 MA20_PERIOD = 20
@@ -61,6 +62,16 @@ DAILY_COLUMNS = [
     "主力_擷取狀態",
 ]
 
+CHART_HISTORY_COLUMNS = [
+    "日期",
+    "開盤價",
+    "最高價",
+    "最低價",
+    "收盤價",
+    "成交量_張",
+    "漲跌幅",
+]
+
 SUMMARY_COLUMNS = [
     "回看天數",
     "區間起始日",
@@ -80,6 +91,7 @@ SUMMARY_COLUMNS = [
     "收盤偏離MA10_%",
     "MA20",
     "收盤偏離MA20_%",
+    "MA20斜率_%",
 ]
 
 # 大盤（加權指數）脈絡欄位：屬當日全市場資料，每檔快照共用同一組數字。
@@ -577,6 +589,22 @@ def _ma_deviation_pct(close: float | None, ma: float | None) -> float | str:
     return round((close - ma) / ma * 100, 2)
 
 
+def _ma20_slope_pct(
+    closes: list[float],
+    *,
+    period: int = MA20_PERIOD,
+    lag: int = 5,
+) -> float | str:
+    """MA20 近 lag 日變化率（%），需至少 period + lag 根收盤價。"""
+    if len(closes) < period + lag:
+        return ""
+    ma_now = sum(closes[-period:]) / period
+    ma_past = sum(closes[-(period + lag) : -lag]) / period
+    if ma_past == 0:
+        return ""
+    return round((ma_now - ma_past) / ma_past * 100, 2)
+
+
 def _trailing_closes_from_dataset(
     price_by_date: dict[str, dict[str, Any]],
     end_date: str,
@@ -663,6 +691,7 @@ def compute_summary_fields(
         "收盤偏離MA10_%": ma10_deviation,
         "MA20": ma20,
         "收盤偏離MA20_%": ma20_deviation,
+        "MA20斜率_%": _ma20_slope_pct(trailing_closes),
     }
 
 
@@ -736,6 +765,35 @@ def fetch_market_context(
     }
 
 
+def build_chart_history_rows(
+    datasets: dict[str, dict[str, dict[str, Any]]],
+    chart_dates: list[str],
+) -> list[dict[str, Any]]:
+    """Slim OHLCV rows for website charts (separate from chip lookback history)."""
+    price_by_date = datasets["price"]
+    rows: list[dict[str, Any]] = []
+    for day in chart_dates:
+        price_row = price_by_date.get(day)
+        if not price_row:
+            continue
+        close = price_row.get("close", "")
+        if close == "":
+            continue
+        trading_volume = int(price_row.get("Trading_Volume") or 0)
+        rows.append(
+            {
+                "日期": day,
+                "開盤價": price_row.get("open", ""),
+                "最高價": price_row.get("max", ""),
+                "最低價": price_row.get("min", ""),
+                "收盤價": close,
+                "成交量_張": shares_to_lots(trading_volume) if trading_volume else "",
+                "漲跌幅": price_row.get("spread", ""),
+            }
+        )
+    return rows
+
+
 def build_stock_report(
     client: FinMindClient,
     stock_id: str,
@@ -744,12 +802,15 @@ def build_stock_report(
     lookback_dates: list[str],
     yahoo: YahooMajorFlowClient | None,
     market_context: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    chart_lookback_days: int = DEFAULT_CHART_LOOKBACK_DAYS,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     if not lookback_dates:
         lookback_dates = [trade_date]
 
+    chart_days = max(chart_lookback_days, MA20_PERIOD)
     ma_price_dates = resolve_lookback_dates(client, trade_date, MA20_PERIOD)
-    range_start = min(lookback_dates[0], ma_price_dates[0])
+    chart_dates = resolve_lookback_dates(client, trade_date, chart_days)
+    range_start = min(lookback_dates[0], ma_price_dates[0], chart_dates[0])
     datasets = fetch_stock_datasets(client, stock_id, range_start, trade_date)
     price_closes = _trailing_closes_from_dataset(datasets["price"], trade_date)
 
@@ -760,6 +821,8 @@ def build_stock_report(
             row = attach_major_flow(row, yahoo, quiet=True)
         daily_rows.append(row)
 
+    chart_history = build_chart_history_rows(datasets, chart_dates)
+
     summary = compute_summary_fields(
         daily_rows,
         lookback_days=len(lookback_dates),
@@ -767,7 +830,7 @@ def build_stock_report(
     )
     market = market_context or {col: "" for col in MARKET_COLUMNS}
     snapshot = {**daily_rows[-1], **summary, **market}
-    return snapshot, daily_rows
+    return snapshot, daily_rows, chart_history
 
 
 def stock_report_dir(trade_date: str) -> Path:
@@ -782,6 +845,10 @@ def stock_csv_path(trade_date: str, stock_id: str) -> Path:
 
 def stock_history_csv_path(trade_date: str, stock_id: str) -> Path:
     return stock_report_dir(trade_date) / f"tw_stock_{stock_id}_history.csv"
+
+
+def stock_chart_history_csv_path(trade_date: str, stock_id: str) -> Path:
+    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}_chart_history.csv"
 
 
 def stock_facts_json_path(trade_date: str, stock_id: str) -> Path:
@@ -817,6 +884,15 @@ def parse_args() -> argparse.Namespace:
         help=f"回看交易日天數（預設 {DEFAULT_LOOKBACK_DAYS}）",
     )
     parser.add_argument(
+        "--chart-lookback-days",
+        type=int,
+        default=DEFAULT_CHART_LOOKBACK_DAYS,
+        help=(
+            f"網站圖表回看交易日天數（預設 {DEFAULT_CHART_LOOKBACK_DAYS}；"
+            "與籌碼回看分開）"
+        ),
+    )
+    parser.add_argument(
         "--watchlist",
         type=Path,
         default=DEFAULT_WATCHLIST,
@@ -834,6 +910,7 @@ def main() -> int:
     args = parse_args()
     token = os.environ.get("FINMIND_TOKEN", "").strip()
     lookback_days = max(1, args.lookback_days)
+    chart_lookback_days = max(MA20_PERIOD, args.chart_lookback_days)
 
     try:
         stock_ids = load_stock_ids(args.stocks, args.watchlist)
@@ -847,9 +924,10 @@ def main() -> int:
         output_dir = stock_report_dir(trade_date)
         snapshot_paths: list[Path] = []
         history_paths: list[Path] = []
+        chart_history_paths: list[Path] = []
 
         for stock_id in stock_ids:
-            snapshot, history = build_stock_report(
+            snapshot, history, chart_history = build_stock_report(
                 client,
                 stock_id,
                 stock_names.get(stock_id, ""),
@@ -857,10 +935,12 @@ def main() -> int:
                 lookback_dates,
                 yahoo,
                 market_context=market_context,
+                chart_lookback_days=chart_lookback_days,
             )
 
             snapshot_path = stock_csv_path(trade_date, stock_id)
             history_path = stock_history_csv_path(trade_date, stock_id)
+            chart_history_path = stock_chart_history_csv_path(trade_date, stock_id)
 
             snapshot_columns = DAILY_COLUMNS + SUMMARY_COLUMNS + MARKET_COLUMNS
             pd.DataFrame([snapshot], columns=snapshot_columns).to_csv(
@@ -873,9 +953,15 @@ def main() -> int:
                 index=False,
                 encoding="utf-8-sig",
             )
+            pd.DataFrame(chart_history, columns=CHART_HISTORY_COLUMNS).to_csv(
+                chart_history_path,
+                index=False,
+                encoding="utf-8-sig",
+            )
 
             snapshot_paths.append(snapshot_path)
             history_paths.append(history_path)
+            chart_history_paths.append(chart_history_path)
 
             try:
                 build_chip_facts, write_facts_json = _load_chip_signals()
@@ -899,6 +985,10 @@ def main() -> int:
 
         print(f"交易日期: {trade_date}")
         print(f"回看天數: {len(lookback_dates)}（{lookback_dates[0]}～{trade_date}）")
+        if chart_history_paths:
+            print(
+                f"圖表回看: {chart_lookback_days} 交易日（檔案: *_chart_history.csv）"
+            )
         if date_note:
             print(date_note)
         print(f"輸出目錄: {output_dir.resolve()}")
@@ -906,6 +996,8 @@ def main() -> int:
             print(f"輸出檔案: {csv_path.resolve()}")
         for csv_path in history_paths:
             print(f"歷史檔案: {csv_path.resolve()}")
+        for csv_path in chart_history_paths:
+            print(f"圖表歷史: {csv_path.resolve()}")
         print(f"股票檔數: {len(snapshot_paths)}")
         return 0
     except Exception as exc:

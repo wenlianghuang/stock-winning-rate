@@ -39,6 +39,10 @@ def _row(**overrides) -> dict[str, str]:
         "區間融券餘額淨變化_張": "20",
         "區間成交量均值_張": "12000",
         "區間當沖佔比均值_%": "30",
+        "MA5": "32.0",
+        "MA10": "31.0",
+        "MA20": "30.0",
+        "MA20斜率_%": "1.2",
     }
     base.update(overrides)
     return base
@@ -87,6 +91,68 @@ class ChipSignalsTests(unittest.TestCase):
         facts = build_chip_facts(row)
         self.assertEqual(facts.ma20_position, "unknown")
         self.assertEqual(facts.ma_alignment, "unknown")
+
+    def test_ma_stack_bullish(self) -> None:
+        facts = build_chip_facts(_row())
+        self.assertEqual(facts.ma_stack, "bullish_stack")
+        self.assertTrue(any("多頭排列" in anchor for anchor in facts.anchors))
+
+    def test_ma_stack_bearish(self) -> None:
+        facts = build_chip_facts(_row(MA5="28.0", MA10="29.0", MA20="30.0"))
+        self.assertEqual(facts.ma_stack, "bearish_stack")
+
+    def test_ma_stack_mixed_when_interleaved(self) -> None:
+        facts = build_chip_facts(_row(MA5="31.0", MA10="30.0", MA20="30.5"))
+        self.assertEqual(facts.ma_stack, "mixed")
+
+    def test_ma_stack_unknown_without_ma_values(self) -> None:
+        row = _row()
+        for key in ("MA5", "MA10", "MA20"):
+            del row[key]
+        facts = build_chip_facts(row)
+        self.assertEqual(facts.ma_stack, "unknown")
+
+    def test_ma20_slope_rising(self) -> None:
+        facts = build_chip_facts(_row(**{"MA20斜率_%": "1.2"}))
+        self.assertEqual(facts.ma20_slope, "rising")
+        self.assertEqual(facts.ma20_slope_pct, 1.2)
+
+    def test_ma20_slope_falling(self) -> None:
+        facts = build_chip_facts(_row(**{"MA20斜率_%": "-1.0"}))
+        self.assertEqual(facts.ma20_slope, "falling")
+
+    def test_ma20_slope_flat(self) -> None:
+        facts = build_chip_facts(_row(**{"MA20斜率_%": "0.2"}))
+        self.assertEqual(facts.ma20_slope, "flat")
+
+    def test_ma_stack_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(MA5="28.0", MA10="29.0", MA20="30.0"))
+        body = "## 當日籌碼解讀\n均線呈多頭排列，結構偏多。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma_stack_mismatch", codes)
+
+    def test_ma20_slope_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"MA20斜率_%": "-1.0"}))
+        body = "## 當日籌碼解讀\n月線上揚，中期結構轉強。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma20_slope_mismatch", codes)
+
+    def test_ma20_slope_from_history_closes(self) -> None:
+        history = []
+        for index, close in enumerate(range(100, 125), start=1):
+            history.append(
+                {
+                    "日期": f"2026-06-{index:02d}",
+                    "收盤價": str(close),
+                }
+            )
+        row = _row()
+        del row["MA20斜率_%"]
+        row["收盤價"] = "124"
+        facts = build_chip_facts(row, history)
+        self.assertEqual(facts.ma20_slope, "rising")
+        self.assertIsNotNone(facts.ma20_slope_pct)
+        self.assertGreater(facts.ma20_slope_pct or 0, 0)
 
     def test_ma20_position_fact_check(self) -> None:
         # facts 判定跌破月線，正文卻寫站上月線 → fact_ma20_position

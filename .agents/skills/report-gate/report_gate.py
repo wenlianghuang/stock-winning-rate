@@ -162,6 +162,8 @@ FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_ma_alignment_mismatch": "短中線均線排列（MA5 vs MA20）敘述與 facts 矛盾，請依系統判定的短中線方向修正",
     "fact_ma5_ma10_alignment_mismatch": "短線均線對齊（MA5 vs MA10）敘述與 facts 矛盾，請依系統判定的短線方向修正",
     "fact_ma10_ma20_alignment_mismatch": "短中線均線對齊（MA10 vs MA20）敘述與 facts 矛盾，請依系統判定的短中線方向修正",
+    "fact_ma_stack_mismatch": "均線排列（MA5/MA10/MA20 結構）敘述與 facts 矛盾，請依系統判定的多/空頭排列修正",
+    "fact_ma20_slope_mismatch": "月線（MA20）斜率敘述與 facts 矛盾，請依系統判定的月線走向修正",
     "fact_volume_mismatch": "成交量描述與 facts（放量/縮量）矛盾，請依系統量能判定修正",
     "fact_price_trend_mismatch": "區間價格趨勢描述與 facts（price_trend）矛盾，請依區間漲跌方向修正",
     "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，正文不可描述為籌碼健康或量價配合良好",

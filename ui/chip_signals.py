@@ -107,6 +107,25 @@ MA_MID_ALIGN_LABEL = {
     "unknown": "MA10/MA20 資料不足",
 }
 
+# 均線本身排列（MA5 vs MA10 vs MA20 數值大小），與收盤相對均線位置不同
+MA_STACK_LABEL = {
+    "bullish_stack": "均線多頭排列（MA5 > MA10 > MA20）",
+    "bearish_stack": "均線空頭排列（MA5 < MA10 < MA20）",
+    "mixed": "均線糾結（未形成明確多/空頭排列）",
+    "unknown": "均線排列資料不足",
+}
+
+MA20_SLOPE_LABEL = {
+    "rising": "月線（MA20）趨勢向上",
+    "falling": "月線（MA20）趨勢向下",
+    "flat": "月線（MA20）走勢平穩",
+    "unknown": "月線斜率資料不足",
+}
+
+MA20_SLOPE_THRESHOLD_PCT = 0.5
+MA20_PERIOD = 20
+MA20_SLOPE_LAG = 5
+
 INTENSITY_LABEL = {
     "high": "偏高",
     "normal": "正常",
@@ -169,6 +188,58 @@ def _ma_pair_alignment(short_position: str, long_position: str) -> str:
     return "neutral"
 
 
+def _moving_average(closes: list[float], period: int) -> float | None:
+    if len(closes) < period:
+        return None
+    return sum(closes[-period:]) / period
+
+
+def _ma_stack(ma5: float | None, ma10: float | None, ma20: float | None) -> str:
+    """均線數值排列：MA5/MA10/MA20 的大小關係（非收盤相對位置）。"""
+    if ma5 is None or ma10 is None or ma20 is None:
+        return "unknown"
+    if ma5 <= 0 or ma10 <= 0 or ma20 <= 0:
+        return "unknown"
+    if ma5 > ma10 > ma20:
+        return "bullish_stack"
+    if ma5 < ma10 < ma20:
+        return "bearish_stack"
+    return "mixed"
+
+
+def _ma20_slope_pct_from_closes(closes: list[float]) -> float | None:
+    if len(closes) < MA20_PERIOD + MA20_SLOPE_LAG:
+        return None
+    ma_now = _moving_average(closes, MA20_PERIOD)
+    ma_past = _moving_average(closes[:-MA20_SLOPE_LAG], MA20_PERIOD)
+    if ma_now is None or ma_past is None or ma_past == 0:
+        return None
+    return round((ma_now - ma_past) / ma_past * 100, 2)
+
+
+def _ma20_slope_label(slope_pct: float | None) -> str:
+    if slope_pct is None:
+        return "unknown"
+    if slope_pct > MA20_SLOPE_THRESHOLD_PCT:
+        return "rising"
+    if slope_pct < -MA20_SLOPE_THRESHOLD_PCT:
+        return "falling"
+    return "flat"
+
+
+def _closes_from_row_and_history(row: dict, history: list[dict]) -> list[float]:
+    closes: list[float] = []
+    for hist_row in history:
+        close = _to_float(hist_row.get("收盤價"))
+        if close is not None:
+            closes.append(close)
+    close_today = _to_float(row.get("收盤價"))
+    if close_today is not None:
+        if not closes or closes[-1] != close_today:
+            closes.append(close_today)
+    return closes
+
+
 def _relative_strength(stock_pct: float | None, market_pct: float | None, *, band: float) -> str:
     if stock_pct is None or market_pct is None:
         return "unknown"
@@ -223,6 +294,9 @@ class ChipFacts:
     ma_alignment: str  # bullish/bearish/short_rebound/short_pullback/neutral/unknown（legacy: MA5 vs MA20）
     ma_short_alignment: str  # MA5 vs MA10
     ma_mid_alignment: str  # MA10 vs MA20
+    ma_stack: str = "unknown"  # bullish_stack/bearish_stack/mixed/unknown
+    ma20_slope: str = "unknown"  # rising/falling/flat/unknown
+    ma20_slope_pct: float | None = None
     divergences: list[str] = field(default_factory=list)
 
     # 規則化判定（v2）
@@ -471,6 +545,18 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     ma_short_alignment = _ma_pair_alignment(ma5_position, ma10_position)
     ma_mid_alignment = _ma_pair_alignment(ma10_position, ma20_position)
 
+    ma5_val = _to_float(row.get("MA5"))
+    ma10_val = _to_float(row.get("MA10"))
+    ma20_val = _to_float(row.get("MA20"))
+    ma_stack = _ma_stack(ma5_val, ma10_val, ma20_val)
+
+    ma20_slope_pct = _to_float(row.get("MA20斜率_%"))
+    if ma20_slope_pct is None:
+        ma20_slope_pct = _ma20_slope_pct_from_closes(
+            _closes_from_row_and_history(row, history)
+        )
+    ma20_slope = _ma20_slope_label(ma20_slope_pct)
+
     divergences = _detect_divergences(
         today_change=today_change,
         foreign_net=foreign_net,
@@ -565,6 +651,9 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         ma_alignment=ma_alignment,
         ma_short_alignment=ma_short_alignment,
         ma_mid_alignment=ma_mid_alignment,
+        ma_stack=ma_stack,
+        ma20_slope=ma20_slope,
+        ma20_slope_pct=ma20_slope_pct,
         divergences=divergences,
         institutional_consensus=institutional,
         major_foreign_divergence=major_foreign_div,
@@ -694,6 +783,18 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
     }:
         anchors.append(MA_MID_ALIGN_LABEL[facts.ma_mid_alignment])
 
+    if facts.ma_stack in {"bullish_stack", "bearish_stack"}:
+        anchors.append(MA_STACK_LABEL[facts.ma_stack])
+    elif facts.ma_stack == "mixed":
+        anchors.append(MA_STACK_LABEL["mixed"])
+
+    if facts.ma20_slope in {"rising", "falling"}:
+        label = MA20_SLOPE_LABEL[facts.ma20_slope]
+        if facts.ma20_slope_pct is not None:
+            anchors.append(f"{label}（近 5 日 {facts.ma20_slope_pct:+.1f}%）")
+        else:
+            anchors.append(label)
+
     if facts.price_trend in {"up", "down"} and facts.period_return_pct is not None:
         move = "上漲" if facts.price_trend == "up" else "下跌"
         days = f"{facts.lookback_days} 日" if facts.lookback_days else "區間"
@@ -769,6 +870,13 @@ def facts_summary_for_prompt(facts: ChipFacts) -> str:
         lines.append(f"- MA5 vs MA10：{MA_SHORT_ALIGN_LABEL[facts.ma_short_alignment]}")
     if getattr(facts, "ma_mid_alignment", "unknown") != "unknown":
         lines.append(f"- MA10 vs MA20：{MA_MID_ALIGN_LABEL[facts.ma_mid_alignment]}")
+    if facts.ma_stack != "unknown":
+        lines.append(f"- 均線排列：{MA_STACK_LABEL[facts.ma_stack]}")
+    if facts.ma20_slope != "unknown":
+        slope_line = f"- 月線斜率：{MA20_SLOPE_LABEL[facts.ma20_slope]}"
+        if facts.ma20_slope_pct is not None:
+            slope_line += f"（近 5 日 MA20 變化 {facts.ma20_slope_pct:+.2f}%）"
+        lines.append(slope_line)
     if facts.day_trade_intensity != "unknown":
         lines.append(
             f"- 當沖熱度：{INTENSITY_LABEL[facts.day_trade_intensity]}"

@@ -136,6 +136,35 @@ MA10_MA20_BEARISH_PHRASES = (
     "短中線同步偏空",
     "短中線偏空",
 )
+# 均線數值排列（MA5 > MA10 > MA20 或反之），與收盤相對均線位置不同
+MA_STACK_BULLISH_PHRASES = (
+    "多頭排列",
+    "均線多頭",
+    "MA5大於MA10",
+    "MA5>MA10",
+)
+MA_STACK_BEARISH_PHRASES = (
+    "空頭排列",
+    "均線空頭",
+    "MA5小於MA10",
+    "MA5<MA10",
+)
+MA20_SLOPE_RISING_PHRASES = (
+    "月線上揚",
+    "月線向上",
+    "MA20向上",
+    "MA20走升",
+    "月線走升",
+    "月線趨勢向上",
+)
+MA20_SLOPE_FALLING_PHRASES = (
+    "月線下彎",
+    "月線向下",
+    "MA20向下",
+    "MA20走跌",
+    "月線走跌",
+    "月線趨勢向下",
+)
 # short_rebound：站上 MA5 但仍在 MA20 下，不可寫成同步偏多或中期已轉強
 MA_ALIGN_REBOUND_DENY_PHRASES = MA_ALIGN_BULLISH_PHRASES + (
     "中期轉強",
@@ -526,6 +555,50 @@ def run_fact_checks(
                 (
                     "fact_ma10_ma20_alignment_mismatch",
                     f"facts 判定 MA10 vs MA20 同步偏空，正文卻描述「{bull}」，與短中線對齊矛盾",
+                )
+            )
+
+    ma_stack = getattr(facts, "ma_stack", "unknown")
+    if ma_stack in {"bullish_stack", "bearish_stack"}:
+        stripped = _strip_tables(text)
+        bull = _contains_any(stripped, MA_STACK_BULLISH_PHRASES)
+        bear = _contains_any(stripped, MA_STACK_BEARISH_PHRASES)
+        if ma_stack == "bullish_stack" and bear and not bull:
+            issues.append(
+                (
+                    "fact_ma_stack_mismatch",
+                    f"facts 判定均線多頭排列（MA5 > MA10 > MA20），"
+                    f"正文卻描述「{bear}」，與均線排列矛盾",
+                )
+            )
+        elif ma_stack == "bearish_stack" and bull and not bear:
+            issues.append(
+                (
+                    "fact_ma_stack_mismatch",
+                    f"facts 判定均線空頭排列（MA5 < MA10 < MA20），"
+                    f"正文卻描述「{bull}」，與均線排列矛盾",
+                )
+            )
+
+    ma20_slope = getattr(facts, "ma20_slope", "unknown")
+    if ma20_slope in {"rising", "falling"}:
+        stripped = _strip_tables(text)
+        rising = _contains_any(stripped, MA20_SLOPE_RISING_PHRASES)
+        falling = _contains_any(stripped, MA20_SLOPE_FALLING_PHRASES)
+        if ma20_slope == "rising" and falling and not rising:
+            issues.append(
+                (
+                    "fact_ma20_slope_mismatch",
+                    f"facts 判定月線（MA20）趨勢向上，"
+                    f"正文卻描述「{falling}」，與月線斜率矛盾",
+                )
+            )
+        elif ma20_slope == "falling" and rising and not falling:
+            issues.append(
+                (
+                    "fact_ma20_slope_mismatch",
+                    f"facts 判定月線（MA20）趨勢向下，"
+                    f"正文卻描述「{rising}」，與月線斜率矛盾",
                 )
             )
 

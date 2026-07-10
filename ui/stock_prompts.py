@@ -10,6 +10,7 @@ ANALYSIS_FORMAT_RULES = """
 - 正文須明確引用 facts 中的 anchors（至少 2 條），作為趨勢與交叉對照的依據
 - 若 facts 標記**籌碼型態（chip_regime）**、**三大法人共識**或**主力外資背離**，趨勢段須明確說明
 - 技術面須同時說明**收盤相對 MA10（10 日線）與 MA20（月線）**的位置，並依 facts 的**兩兩對齊（MA5 vs MA10、MA10 vs MA20）**說明短線與月線是否一致
+- 若 facts 提供**均線排列（ma_stack）**或**月線斜率（ma20_slope）**，須說明均線結構（多/空頭排列、糾結）與月線走向，且不可與 facts 矛盾
 - 若 facts 標記**成交量放量/縮量**或**區間價格趨勢**，敘述須與 facts 一致，不可矛盾
 
 ## 一、當日籌碼解讀
@@ -61,6 +62,7 @@ def build_single_stock_analysis_prompt_suffix(
         "其他要求：\n"
         "- 方向（買/賣、偏多/偏空、站上/跌破 MA5 與 MA20 月線）必須與 facts 一致\n"
         "- 技術面須涵蓋 MA20（月線），並用 MA5 vs MA10、MA10 vs MA20 的兩兩對齊描述短中線是否一致\n"
+        "- 若 facts 提供 ma_stack / ma20_slope，須說明均線排列結構與月線斜率，且與 facts 一致\n"
         "- 若 facts 提供大盤脈絡，個股相對大盤（強於/弱於/同步）須與 facts 的相對強弱一致\n"
         "- 正文須明確引用 facts 的 anchors（至少 2 條）\n"
         "- 主力外資背離、法人共識、chip_regime 須在趨勢/交叉段說明\n"
