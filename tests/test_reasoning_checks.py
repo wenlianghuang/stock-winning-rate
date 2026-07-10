@@ -55,8 +55,8 @@ def _good_body() -> str:
 - 主力賣超與外資背離，短線仍有分歧
 
 ## 短中線情境推演
-- 若外資延續買超且站穩均線，則短線偏多；觀察外資連續買超
-- 若主力轉賣且跌破 MA5，則轉弱；觀察成交量
+- 若外資延續買超且站穩均線，則短線偏多；可追蹤外資連續買超
+- 若主力轉賣且跌破 MA5，則轉弱；可追蹤成交量
 
 ## 觀察重點
 1. 外資是否連續買超
@@ -95,14 +95,33 @@ class ReasoningChecksTests(unittest.TestCase):
     def test_scenario_no_trigger(self) -> None:
         body = _good_body().replace(
             "## 短中線情境推演\n"
-            "- 若外資延續買超且站穩均線，則短線偏多；觀察外資連續買超\n"
-            "- 若主力轉賣且跌破 MA5，則轉弱；觀察成交量",
+            "- 若外資延續買超且站穩均線，則短線偏多；可追蹤外資連續買超\n"
+            "- 若主力轉賣且跌破 MA5，則轉弱；可追蹤成交量",
             "## 短中線情境推演\n"
-            "- 短線偏多，觀察籌碼\n"
+            "- 短線偏多，留意籌碼\n"
             "- 短線轉弱，留意賣壓",
         )
         codes = [code for code, _ in run_reasoning_checks(body, self.facts)]
         self.assertIn("reasoning_scenario_no_trigger", codes)
+
+    def test_scenario_with_inline_observe_does_not_break_watch(self) -> None:
+        """情境推演含「可觀察」時，觀察重點章節仍應被正確驗證。"""
+        body = _good_body().replace(
+            "## 短中線情境推演\n"
+            "- 若外資延續買超且站穩均線，則短線偏多；可追蹤外資連續買超\n"
+            "- 若主力轉賣且跌破 MA5，則轉弱；可追蹤成交量",
+            "## 短中線情境推演\n"
+            "- 若外資延續買超，則短線偏多；此時可觀察的指標為外資連續買超\n"
+            "- 若主力轉賣，則轉弱；此時可觀察的指標為成交量",
+        )
+        issues = run_reasoning_checks(
+            body,
+            self.facts,
+            has_news=True,
+            news_titles=["面板景氣回溫"],
+        )
+        codes = [code for code, _ in issues]
+        self.assertNotIn("reasoning_watch_not_actionable", codes)
 
     def test_fact_chip_regime_mismatch(self) -> None:
         self.facts.chip_regime = "distribution"

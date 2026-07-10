@@ -30,7 +30,7 @@ SECTION_CHECKS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("news", "近期新聞與事件", ("新聞", "事件")),
     ("cross", "籌碼與新聞交叉對照", ("交叉", "對照", "背離", "一致")),
     ("scenarios", "短中線情境推演", ("情境推演", "情境", "交易日")),
-    ("watch", "觀察重點", ("觀察",)),
+    ("watch", "觀察重點", ("觀察重點",)),
     ("disclaimer", "免責聲明", ("免責",)),
 )
 
@@ -86,24 +86,6 @@ def _bullet_count(text: str) -> int:
 
 def _section_present(body: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in body for keyword in keywords)
-
-
-def _slice_after_keywords(body: str, keywords: tuple[str, ...]) -> str:
-    lines = body.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        if any(keyword in line for keyword in keywords):
-            start = index + 1
-            break
-    if start is None:
-        return ""
-
-    chunk: list[str] = []
-    for line in lines[start:]:
-        if chunk and re.match(r"^##\s+", line.strip()):
-            break
-        chunk.append(line)
-    return "\n".join(chunk)
 
 
 def validate_single_stock_report(
@@ -183,6 +165,8 @@ def validate_single_stock_report(
                 "有提供新聞時，「近期新聞與事件」章節應使用 Markdown 表格",
             )
         )
+
+    from fact_checks import _slice_after_keywords
 
     for code, label, keywords in SECTION_CHECKS:
         if code not in TEXT_SECTIONS:

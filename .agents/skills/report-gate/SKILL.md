@@ -95,4 +95,4 @@ Chat UI：`/gate 2409` 或 `/report-gate 2409`
 - **Loop：** `build_fix_prompt` 依 `issue_codes` 給出對應的修正指引，第二輪針對矛盾修正而非只補章節。
 - **自主執行階段：** 驗證失敗時自動進入下一輪 agy 修正，無需人工確認。
 - **人工介入（臨界點）：** 達 `--max-rounds` 仍失敗；或 exit 10 / 20。
-- 預設 `MAX_ROUNDS = 3`。
+- 預設 `MAX_ROUNDS = 8`。

@@ -88,6 +88,25 @@ MA_ALIGNMENT_LABEL = {
     "unknown": "均線資料不足",
 }
 
+# 三均線改為兩兩對齊（B）：MA5 vs MA10（更短線）、MA10 vs MA20（短中線）
+MA_SHORT_ALIGN_LABEL = {
+    "bullish": "短線偏多（收盤站上 MA5 與 MA10）",
+    "bearish": "短線偏空（收盤跌破 MA5 與 MA10）",
+    "short_rebound": "更短線轉強、短線仍弱（站上 MA5 但仍在 MA10 下方）",
+    "short_pullback": "更短線回檔、短線仍強（跌破 MA5 但仍在 MA10 上方）",
+    "neutral": "短線方向不明（MA5/MA10 糾結或貼近）",
+    "unknown": "MA5/MA10 資料不足",
+}
+
+MA_MID_ALIGN_LABEL = {
+    "bullish": "短中線偏多（收盤站上 MA10 與 MA20）",
+    "bearish": "短中線偏空（收盤跌破 MA10 與 MA20）",
+    "short_rebound": "短線反彈、中期仍弱（站上 MA10 但仍在 MA20 下方）",
+    "short_pullback": "短線回檔、中期仍強（跌破 MA10 但仍在 MA20 上方）",
+    "neutral": "短中線方向不明（MA10/MA20 糾結或貼近）",
+    "unknown": "MA10/MA20 資料不足",
+}
+
 INTENSITY_LABEL = {
     "high": "偏高",
     "normal": "正常",
@@ -135,6 +154,21 @@ def _ma_alignment(ma5_position: str, ma20_position: str) -> str:
     return "neutral"
 
 
+def _ma_pair_alignment(short_position: str, long_position: str) -> str:
+    """兩均線對齊（僅用 above/below/at/unknown，不涉回測）。"""
+    if short_position == "unknown" or long_position == "unknown":
+        return "unknown"
+    if short_position == "above" and long_position == "above":
+        return "bullish"
+    if short_position == "below" and long_position == "below":
+        return "bearish"
+    if short_position == "above" and long_position == "below":
+        return "short_rebound"
+    if short_position == "below" and long_position == "above":
+        return "short_pullback"
+    return "neutral"
+
+
 def _relative_strength(stock_pct: float | None, market_pct: float | None, *, band: float) -> str:
     if stock_pct is None or market_pct is None:
         return "unknown"
@@ -161,6 +195,7 @@ class ChipFacts:
 
     today_change_pct: float | None
     close_vs_ma5_pct: float | None
+    close_vs_ma10_pct: float | None
     close_vs_ma20_pct: float | None
     margin_today_delta_lots: int | None
     volume_today_lots: int | None
@@ -183,8 +218,11 @@ class ChipFacts:
     foreign_streak_days: int
     price_trend: str  # "up" | "down" | "flat" | "unknown"
     ma5_position: str  # "above" | "below" | "at" | "unknown"
+    ma10_position: str  # "above" | "below" | "at" | "unknown"
     ma20_position: str  # "above" | "below" | "at" | "unknown"
-    ma_alignment: str  # bullish/bearish/short_rebound/short_pullback/neutral/unknown
+    ma_alignment: str  # bullish/bearish/short_rebound/short_pullback/neutral/unknown（legacy: MA5 vs MA20）
+    ma_short_alignment: str  # MA5 vs MA10
+    ma_mid_alignment: str  # MA10 vs MA20
     divergences: list[str] = field(default_factory=list)
 
     # 規則化判定（v2）
@@ -390,6 +428,7 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
 
     today_change = _to_float(row.get("漲跌幅"))
     close_vs_ma5 = _to_float(row.get("收盤偏離MA5_%"))
+    close_vs_ma10 = _to_float(row.get("收盤偏離MA10_%"))
     close_vs_ma20 = _to_float(row.get("收盤偏離MA20_%"))
     margin_today_delta = _to_int(row.get("融資增減_張"))
     volume_today = _to_int(row.get("成交量_張"))
@@ -426,8 +465,11 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     else:
         ma5_position = "at"
 
+    ma10_position = _position_from_deviation(close_vs_ma10)
     ma20_position = _position_from_deviation(close_vs_ma20)
     ma_alignment = _ma_alignment(ma5_position, ma20_position)
+    ma_short_alignment = _ma_pair_alignment(ma5_position, ma10_position)
+    ma_mid_alignment = _ma_pair_alignment(ma10_position, ma20_position)
 
     divergences = _detect_divergences(
         today_change=today_change,
@@ -499,6 +541,7 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         major_available=major_available,
         today_change_pct=today_change,
         close_vs_ma5_pct=close_vs_ma5,
+        close_vs_ma10_pct=close_vs_ma10,
         close_vs_ma20_pct=close_vs_ma20,
         margin_today_delta_lots=margin_today_delta,
         volume_today_lots=volume_today,
@@ -517,8 +560,11 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         foreign_streak_days=streak_days,
         price_trend=price_trend,
         ma5_position=ma5_position,
+        ma10_position=ma10_position,
         ma20_position=ma20_position,
         ma_alignment=ma_alignment,
+        ma_short_alignment=ma_short_alignment,
+        ma_mid_alignment=ma_mid_alignment,
         divergences=divergences,
         institutional_consensus=institutional,
         major_foreign_divergence=major_foreign_div,
@@ -612,6 +658,13 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
     elif facts.ma5_position == "below" and facts.close_vs_ma5_pct is not None:
         anchors.append(f"收盤低於 MA5 約 {abs(facts.close_vs_ma5_pct):.1f}%")
 
+    if facts.ma10_position == "above" and facts.close_vs_ma10_pct is not None:
+        anchors.append(f"收盤高於 MA10（10 日線）約 {facts.close_vs_ma10_pct:.1f}%")
+    elif facts.ma10_position == "below" and facts.close_vs_ma10_pct is not None:
+        anchors.append(
+            f"收盤低於 MA10（10 日線）約 {abs(facts.close_vs_ma10_pct):.1f}%"
+        )
+
     if facts.ma20_position == "above" and facts.close_vs_ma20_pct is not None:
         anchors.append(f"收盤高於 MA20（月線）約 {facts.close_vs_ma20_pct:.1f}%")
     elif facts.ma20_position == "below" and facts.close_vs_ma20_pct is not None:
@@ -624,6 +677,22 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
         "short_pullback",
     }:
         anchors.append(MA_ALIGNMENT_LABEL[facts.ma_alignment])
+
+    if facts.ma_short_alignment in {
+        "bullish",
+        "bearish",
+        "short_rebound",
+        "short_pullback",
+    }:
+        anchors.append(MA_SHORT_ALIGN_LABEL[facts.ma_short_alignment])
+
+    if facts.ma_mid_alignment in {
+        "bullish",
+        "bearish",
+        "short_rebound",
+        "short_pullback",
+    }:
+        anchors.append(MA_MID_ALIGN_LABEL[facts.ma_mid_alignment])
 
     if facts.price_trend in {"up", "down"} and facts.period_return_pct is not None:
         move = "上漲" if facts.price_trend == "up" else "下跌"
@@ -688,11 +757,18 @@ def facts_summary_for_prompt(facts: ChipFacts) -> str:
     if facts.ma5_position != "unknown" and facts.close_vs_ma5_pct is not None:
         pos = {"above": "高於", "below": "低於", "at": "貼近"}[facts.ma5_position]
         lines.append(f"- 收盤{pos} MA5（偏離 {facts.close_vs_ma5_pct:+.2f}%）")
+    if facts.close_vs_ma10_pct is not None and facts.ma10_position != "unknown":
+        pos = {"above": "高於", "below": "低於", "at": "貼近"}[facts.ma10_position]
+        lines.append(f"- 收盤{pos} MA10（10 日線，偏離 {facts.close_vs_ma10_pct:+.2f}%）")
     if facts.ma20_position != "unknown" and facts.close_vs_ma20_pct is not None:
         pos = {"above": "高於", "below": "低於", "at": "貼近"}[facts.ma20_position]
         lines.append(f"- 收盤{pos} MA20（月線，偏離 {facts.close_vs_ma20_pct:+.2f}%）")
     if facts.ma_alignment != "unknown":
         lines.append(f"- 短中線技術面：{MA_ALIGNMENT_LABEL[facts.ma_alignment]}")
+    if getattr(facts, "ma_short_alignment", "unknown") != "unknown":
+        lines.append(f"- MA5 vs MA10：{MA_SHORT_ALIGN_LABEL[facts.ma_short_alignment]}")
+    if getattr(facts, "ma_mid_alignment", "unknown") != "unknown":
+        lines.append(f"- MA10 vs MA20：{MA_MID_ALIGN_LABEL[facts.ma_mid_alignment]}")
     if facts.day_trade_intensity != "unknown":
         lines.append(
             f"- 當沖熱度：{INTENSITY_LABEL[facts.day_trade_intensity]}"

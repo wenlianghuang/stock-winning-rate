@@ -2,13 +2,14 @@
 
 Mirrors ``chip_signals`` but for the *position* dimension: Python owns the
 verdicts (profit/loss bucket, distance to breakeven, cost vs MA20, suggested
-bias), so the operation-scenario narrative can be mechanically gated on the
-actual holding — not just generic boilerplate that ignores the cost basis.
+bias, scenario weights), so the operation-scenario narrative can be mechanically
+gated on the actual holding — not just generic boilerplate.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 
 from fact_checks import _slice_after_keywords
@@ -82,7 +83,35 @@ POSITION_BIAS_LABEL = {
     "unknown": "資料不足",
 }
 
+SCENARIO_LABELS = {
+    "continuation": "延續調節",
+    "range": "橫盤整理",
+    "rebound": "技術反彈",
+}
+
+SCENARIO_TRIGGER_HINTS = {
+    "continuation": "若外資續賣、收盤維持 MA10/MA20 下方",
+    "range": "若法人分歧、量能接近區間均值",
+    "rebound": "若站回 MA10 且量能溫和放大",
+}
+
 FactIssue = tuple[str, str]
+
+
+@dataclass
+class ScenarioItem:
+    id: str
+    label: str
+    weight_pct: int
+    action: str
+    trigger_hint: str
+    is_primary: bool = False
+
+
+@dataclass
+class ScenarioPlan:
+    scenarios: list[ScenarioItem]
+    primary_id: str
 
 
 @dataclass
@@ -98,6 +127,7 @@ class PositionFacts:
     breakeven_move_pct: float | None  # 價格須變動多少 % 才回到成本（正=須上漲）
     position_bias: str
     required_action_hint: str = ""
+    scenario_plan: ScenarioPlan | None = None
     anchors: list[str] = field(default_factory=list)
 
 
@@ -160,6 +190,126 @@ def _required_action_hint(bucket: str) -> str:
     }[bucket]
 
 
+def _normalize_weights(scores: dict[str, int]) -> dict[str, int]:
+    """Map raw scores to integer percentages summing to 100."""
+    floored = {key: max(1, value) for key, value in scores.items()}
+    total = sum(floored.values())
+    raw = {key: value * 100.0 / total for key, value in floored.items()}
+    ints = {key: int(raw[key]) for key in raw}
+    remainder = 100 - sum(ints.values())
+    if remainder:
+        primary_key = max(floored, key=floored.get)
+        ints[primary_key] += remainder
+    return ints
+
+
+def _action_for_scenario(scenario_id: str, position_bias: str) -> str:
+    """Recommended operation per market scenario, aligned with position bias."""
+    actions: dict[tuple[str, str], str] = {
+        ("continuation", "defensive"): "減碼 / 觀望 / 停損",
+        ("continuation", "cautious"): "減碼 / 觀望",
+        ("continuation", "neutral"): "觀望 / 減碼",
+        ("continuation", "protect_gains"): "獲利了結 / 減碼 / 移動停損",
+        ("range", "defensive"): "持有觀望 / 不攤平",
+        ("range", "cautious"): "持有觀望 / 減碼條件",
+        ("range", "neutral"): "持有觀望",
+        ("range", "protect_gains"): "續抱 / 觀望 / 分批停利",
+        ("rebound", "defensive"): "不加碼 / 觀望（等站穩均線再評估）",
+        ("rebound", "cautious"): "不加碼 / 觀望",
+        ("rebound", "neutral"): "觀望 / 加碼條件（須站穩 MA20）",
+        ("rebound", "protect_gains"): "續抱 / 分批停利 / 不加碼",
+    }
+    return actions.get(
+        (scenario_id, position_bias),
+        "觀望",
+    )
+
+
+def build_scenario_plan(
+    position_facts: PositionFacts,
+    chip_facts,
+) -> ScenarioPlan:
+    """Deterministic 3-scenario weights (sum 100%) from chip + position signals."""
+    scores = {"continuation": 34, "range": 33, "rebound": 33}
+
+    chip_regime = getattr(chip_facts, "chip_regime", "unknown")
+    if chip_regime == "distribution":
+        scores["continuation"] += 15
+        scores["rebound"] -= 10
+    elif chip_regime == "accumulation":
+        scores["rebound"] += 15
+        scores["continuation"] -= 10
+
+    price_trend = getattr(chip_facts, "price_trend", "unknown")
+    if price_trend == "down":
+        scores["continuation"] += 10
+        scores["rebound"] -= 5
+    elif price_trend == "up":
+        scores["rebound"] += 10
+        scores["continuation"] -= 5
+
+    ma_mid = getattr(chip_facts, "ma_mid_alignment", "unknown")
+    ma_short = getattr(chip_facts, "ma_short_alignment", "unknown")
+    if ma_mid == "bearish":
+        scores["continuation"] += 8
+    elif ma_mid == "bullish":
+        scores["rebound"] += 8
+    elif ma_mid == "short_rebound":
+        scores["rebound"] += 5
+        scores["continuation"] -= 3
+    elif ma_mid == "short_pullback":
+        scores["continuation"] += 5
+        scores["rebound"] -= 3
+
+    if ma_short == "bearish":
+        scores["continuation"] += 5
+    elif ma_short == "bullish":
+        scores["rebound"] += 5
+
+    consensus = getattr(chip_facts, "institutional_consensus", "unknown")
+    if consensus == "bearish":
+        scores["continuation"] += 8
+    elif consensus == "bullish":
+        scores["rebound"] += 8
+    elif consensus == "mixed":
+        scores["range"] += 6
+
+    foreign_dir = getattr(chip_facts, "foreign_direction", 0)
+    if foreign_dir < 0:
+        scores["continuation"] += 4
+    elif foreign_dir > 0:
+        scores["rebound"] += 4
+
+    bias = position_facts.position_bias
+    if bias == "defensive":
+        scores["continuation"] += 10
+        scores["rebound"] -= 6
+    elif bias == "cautious":
+        scores["continuation"] += 6
+        scores["rebound"] -= 3
+    elif bias == "protect_gains":
+        scores["range"] += 6
+        scores["rebound"] -= 4
+
+    weights = _normalize_weights(scores)
+    primary_id = max(weights, key=weights.get)
+    bias_key = position_facts.position_bias
+
+    items = [
+        ScenarioItem(
+            id=scenario_id,
+            label=SCENARIO_LABELS[scenario_id],
+            weight_pct=weights[scenario_id],
+            action=_action_for_scenario(scenario_id, bias_key),
+            trigger_hint=SCENARIO_TRIGGER_HINTS[scenario_id],
+            is_primary=scenario_id == primary_id,
+        )
+        for scenario_id in ("continuation", "range", "rebound")
+    ]
+    items.sort(key=lambda item: item.weight_pct, reverse=True)
+    return ScenarioPlan(scenarios=items, primary_id=primary_id)
+
+
 def build_position_facts(
     row: dict,
     *,
@@ -167,6 +317,7 @@ def build_position_facts(
     stock_name: str,
     avg_cost: float,
     shares: int,
+    chip_facts=None,
 ) -> PositionFacts:
     close_price = _to_float(row.get("收盤價"))
     ma20 = _to_float(row.get("MA20"))
@@ -195,6 +346,8 @@ def build_position_facts(
         position_bias=bias,
         required_action_hint=_required_action_hint(bucket),
     )
+    if chip_facts is not None:
+        facts.scenario_plan = build_scenario_plan(facts, chip_facts)
     facts.anchors = _build_anchors(facts)
     return facts
 
@@ -218,7 +371,34 @@ def _build_anchors(facts: PositionFacts) -> list[str]:
     elif facts.cost_vs_ma20 == "below":
         anchors.append("持股均價低於 MA20（成本在月線下方，中期仍有支撐）")
     anchors.append(POSITION_BIAS_LABEL[facts.position_bias])
+
+    if facts.scenario_plan:
+        primary = next(
+            (s for s in facts.scenario_plan.scenarios if s.is_primary),
+            facts.scenario_plan.scenarios[0],
+        )
+        anchors.append(
+            f"操作主線：{primary.label}（{primary.weight_pct}%）"
+            f"→ {primary.action}"
+        )
     return anchors
+
+
+def scenario_plan_summary_for_prompt(plan: ScenarioPlan) -> str:
+    lines = [
+        "",
+        "【操作情境權重（系統判定，百分比勿修改）】",
+    ]
+    rank_labels = ("主線", "次線", "尾線")
+    for index, item in enumerate(plan.scenarios):
+        rank = rank_labels[index] if index < len(rank_labels) else f"情境{index + 1}"
+        lines.append(
+            f"- {rank}：{item.label}（{item.weight_pct}%）"
+            f"→ 建議操作：{item.action}"
+        )
+        lines.append(f"  觸發參考：{item.trigger_hint}")
+    lines.append("- 正文須依上述權重撰寫三種市場情境，並標示百分比與主線")
+    return "\n".join(lines)
 
 
 def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
@@ -245,11 +425,81 @@ def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
     lines.append(f"- 系統傾向：{POSITION_BIAS_LABEL[facts.position_bias]}")
     if facts.required_action_hint:
         lines.append(f"- 操作情境至少須明確提及：{facts.required_action_hint}")
+    if facts.scenario_plan:
+        lines.append(scenario_plan_summary_for_prompt(facts.scenario_plan))
     return "\n".join(lines)
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _primary_action_forbids_add(primary_action: str) -> bool:
+    """True when primary scenario action emphasizes adding (not 不加碼)."""
+    first = primary_action.split("/")[0].strip()
+    if first.startswith("不加碼"):
+        return False
+    return "加碼" in first
+
+
+def _check_scenario_plan(region: str, facts: PositionFacts) -> list[FactIssue]:
+    plan = facts.scenario_plan
+    if plan is None:
+        return []
+
+    issues: list[FactIssue] = []
+    for item in plan.scenarios:
+        if item.label not in region:
+            issues.append(
+                (
+                    "position_scenario_label_missing",
+                    f"操作情境須包含市場情境「{item.label}」",
+                )
+            )
+        weight_token = f"{item.weight_pct}%"
+        if weight_token not in region:
+            issues.append(
+                (
+                    "position_scenario_weight_missing",
+                    f"操作情境須標示「{item.label}（{weight_token}）」",
+                )
+            )
+
+    primary = next((s for s in plan.scenarios if s.is_primary), plan.scenarios[0])
+    if "主線" not in region:
+        issues.append(
+            (
+                "position_scenario_primary_unmarked",
+                f"操作情境須標示主線（例如：{primary.label}（{primary.weight_pct}%，主線））",
+            )
+        )
+
+    if facts.position_bias in {"defensive", "cautious"}:
+        if _primary_action_forbids_add(primary.action):
+            issues.append(
+                (
+                    "position_scenario_primary_add_forbidden",
+                    f"部位偏防禦時，主線「{primary.label}」不可以加碼為主",
+                )
+            )
+        primary_line = ""
+        for line in region.splitlines():
+            if primary.label in line and (
+                "主線" in line or f"{primary.weight_pct}%" in line
+            ):
+                primary_line = line
+                break
+        if primary_line and re.search(r"加碼", primary_line) and not re.search(
+            r"不加碼", primary_line
+        ):
+            issues.append(
+                (
+                    "position_scenario_primary_add_forbidden",
+                    f"主線情境「{primary.label}」在防禦傾向下不可描述為加碼",
+                )
+            )
+
+    return issues
 
 
 def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssue]:
@@ -310,6 +560,8 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
                     "操作情境須提出停損/減碼/出場等具體防禦手段",
                 )
             )
+
+    issues.extend(_check_scenario_plan(region, facts))
 
     return issues
 

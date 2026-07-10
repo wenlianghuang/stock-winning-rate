@@ -29,6 +29,7 @@ DEFAULT_WATCHLIST = Path(__file__).with_name("watchlist.txt")
 SHARES_PER_LOT = 1000
 DEFAULT_LOOKBACK_DAYS = 5
 MA5_PERIOD = 5
+MA10_PERIOD = 10
 MA20_PERIOD = 20
 MARKET_INDEX_ID = "TAIEX"  # 加權指數（FinMind TaiwanStockPrice data_id）
 
@@ -75,6 +76,8 @@ SUMMARY_COLUMNS = [
     "區間漲跌幅_%",
     "MA5",
     "收盤偏離MA5_%",
+    "MA10",
+    "收盤偏離MA10_%",
     "MA20",
     "收盤偏離MA20_%",
 ]
@@ -618,6 +621,8 @@ def compute_summary_fields(
 
     ma5_val = _moving_average(trailing_closes, MA5_PERIOD)
     ma5 = ma5_val if ma5_val is not None else ""
+    ma10_val = _moving_average(trailing_closes, MA10_PERIOD)
+    ma10 = ma10_val if ma10_val is not None else ""
     ma20_val = _moving_average(trailing_closes, MA20_PERIOD)
     ma20 = ma20_val if ma20_val is not None else ""
 
@@ -628,6 +633,7 @@ def compute_summary_fields(
         period_return = round((last_close - first_close) / first_close * 100, 2)
 
     ma_deviation = _ma_deviation_pct(last_close, ma5_val)
+    ma10_deviation = _ma_deviation_pct(last_close, ma10_val)
     ma20_deviation = _ma_deviation_pct(last_close, ma20_val)
 
     return {
@@ -653,6 +659,8 @@ def compute_summary_fields(
         "區間漲跌幅_%": period_return,
         "MA5": ma5,
         "收盤偏離MA5_%": ma_deviation,
+        "MA10": ma10,
+        "收盤偏離MA10_%": ma10_deviation,
         "MA20": ma20,
         "收盤偏離MA20_%": ma20_deviation,
     }

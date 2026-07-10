@@ -132,6 +132,8 @@ def build_trend_summary_markdown(row: dict[str, str]) -> str | None:
         ["區間漲跌幅", _fmt_pct(row.get("區間漲跌幅_%", ""))],
         ["MA5", _fmt_num(row.get("MA5", ""))],
         ["收盤偏離 MA5", _fmt_pct(row.get("收盤偏離MA5_%", ""))],
+        ["MA10（10 日線）", _fmt_num(row.get("MA10", ""))],
+        ["收盤偏離 MA10", _fmt_pct(row.get("收盤偏離MA10_%", ""))],
         ["MA20（月線）", _fmt_num(row.get("MA20", ""))],
         ["收盤偏離 MA20", _fmt_pct(row.get("收盤偏離MA20_%", ""))],
     ]

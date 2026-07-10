@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import subprocess
 import sys
 import threading
 import uuid
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -30,6 +32,8 @@ STOCK_SCRIPT = ROOT / ".agents" / "skills" / "tw-stock-report" / "fetch_chip_rep
 GATE_SCRIPT = ROOT / ".agents" / "skills" / "report-gate" / "report_gate.py"
 POSITION_SCRIPT = ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py"
 STOCK_ROOT = ROOT / "reports" / "stock"
+
+AGY_TIMEOUT_SEC = 900
 
 
 class JobStatus(str, Enum):
@@ -94,6 +98,19 @@ class CreateJobRequest(BaseModel):
     avg_cost: float | None = Field(default=None, gt=0)
 
 
+class DigestItem(BaseModel):
+    stock_id: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+    stock_name: str | None = None
+    trade_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    markdown: str = Field(..., min_length=20)
+    position_markdown: str | None = None
+
+
+class CreateDigestRequest(BaseModel):
+    digest_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    items: list[DigestItem] = Field(..., min_length=1)
+
+
 def _run_script(script: Path, args: list[str]) -> int:
     result = subprocess.run(
         [sys.executable, str(script), *args],
@@ -105,6 +122,90 @@ def _run_script(script: Path, args: list[str]) -> int:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(detail or f"{script.name} exit {result.returncode}")
     return int(result.returncode)
+
+
+def _ensure_import_paths() -> None:
+    ui_path = ROOT / "ui"
+    ui_text = str(ui_path)
+    if ui_text not in sys.path:
+        sys.path.insert(0, ui_text)
+
+
+def _load_agy_helpers():
+    _ensure_import_paths()
+    from agy_output import agy_output_usable, clean_agy_output
+
+    return clean_agy_output, agy_output_usable
+
+
+def resolve_agy_bin() -> str:
+    custom = os.environ.get("AGY_BIN", "").strip()
+    if custom:
+        return custom
+    found = shutil.which("agy")
+    if not found:
+        raise RuntimeError("找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。")
+    return found
+
+
+def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
+    agy_bin = resolve_agy_bin()
+    clean_agy_output, agy_output_usable = _load_agy_helpers()
+    try:
+        result = subprocess.run(
+            [
+                agy_bin,
+                "-p",
+                prompt,
+                "--dangerously-skip-permissions",
+                "--print-timeout",
+                "15m",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
+
+    raw = result.stdout or result.stderr or ""
+    body = clean_agy_output(raw)
+    if not agy_output_usable(body, min_chars=20):
+        detail = body[:200] if body else "(空)"
+        raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
+    return body
+
+
+def build_digest_prompt(digest_date: str, items: list[DigestItem]) -> str:
+    blocks: list[str] = []
+    for idx, item in enumerate(items, start=1):
+        name = item.stock_name or item.stock_id
+        header = f"【{idx}】{name}（{item.stock_id}）"
+        date_hint = f"交易日：{item.trade_date}" if item.trade_date else ""
+        parts = [header, date_hint, "", "=== 市場報告（Markdown）===", item.markdown.strip()]
+        if item.position_markdown and item.position_markdown.strip():
+            parts.extend(["", "=== 部位報告（Markdown）===", item.position_markdown.strip()])
+        blocks.append("\n".join([p for p in parts if p]))
+
+    joined = "\n\n---\n\n".join(blocks)
+    return (
+        "你是一位台股籌碼日報編輯，任務是把同一日多檔報告融合成一封 email 日報。\n"
+        f"日報日期：{digest_date}\n\n"
+        "輸出要求：\n"
+        "- 請輸出 **嚴格 JSON**（不得有多餘文字、不得用 Markdown code fence）\n"
+        '- JSON 只允許以下欄位：{"subject": string, "main_detail_markdown": string}\n'
+        "- subject：一句話總結（含日期），格式建議：YYYY-MM-DD 台股籌碼日報｜{一句話}\n"
+        "- main_detail_markdown：以 Markdown 撰寫 email 內文，結構固定：\n"
+        "  1) 最上方 2 句總結\n"
+        "  2) ## 重點摘要（3～7 點條列）\n"
+        "  3) ## 個股觀察（每檔 2～4 行，避免表格，避免塞大量數字）\n"
+        "  4) ## 風險提醒（最多 3 點）\n"
+        "- 嚴禁臆造不存在於輸入的新聞或數據；不確定就用保守措辭\n"
+        "- 內文要好讀，避免太長（目標 400～900 字）\n\n"
+        "以下是同日多檔報告（輸入即事實來源）：\n\n"
+        f"{joined}\n"
+    )
 
 
 def _find_md_path(stock_id: str, trade_date: str | None) -> Path | None:
@@ -264,6 +365,22 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/digest")
+    def create_digest(body: CreateDigestRequest) -> dict[str, Any]:
+        try:
+            prompt = build_digest_prompt(body.digest_date, body.items)
+            raw = run_agy(prompt)
+            payload = json.loads(raw)
+            subject = str(payload.get("subject", "")).strip()
+            main_detail = str(payload.get("main_detail_markdown", "")).strip()
+            if not subject or not main_detail:
+                raise ValueError("digest JSON 缺少 subject 或 main_detail_markdown")
+            return {"digest": {"subject": subject, "main_detail_markdown": main_detail}}
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=502, detail=f"Digest JSON 解析失敗：{exc}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:

@@ -25,6 +25,7 @@ def _row(**overrides) -> dict[str, str]:
         "主力_擷取狀態": "ok",
         "漲跌幅": "1.5",
         "收盤偏離MA5_%": "2.0",
+        "收盤偏離MA10_%": "1.2",
         "收盤偏離MA20_%": "1.0",
         "融資增減_張": "50",
         "成交量_張": "20000",
@@ -69,6 +70,8 @@ class ChipSignalsTests(unittest.TestCase):
         self.assertEqual(facts.ma20_position, "above")
         self.assertEqual(facts.ma_alignment, "bullish")
         self.assertTrue(any("MA20" in a for a in facts.anchors))
+        self.assertNotEqual(getattr(facts, "ma_short_alignment", "unknown"), "unknown")
+        self.assertNotEqual(getattr(facts, "ma_mid_alignment", "unknown"), "unknown")
 
     def test_short_rebound_alignment(self) -> None:
         # 站上 MA5(+2%) 但仍在 MA20 下方(-1.5%) → 短線反彈、中期仍弱
@@ -94,6 +97,35 @@ class ChipSignalsTests(unittest.TestCase):
         body = "## 當日籌碼解讀\n收盤已站上月線，中期轉強。\n"
         codes = [c for c, _ in run_fact_checks(body, facts)]
         self.assertIn("fact_ma20_position", codes)
+
+    def test_ma10_position_fact_check(self) -> None:
+        # facts 判定跌破 10 日線，正文卻寫站上 10 日線 → fact_ma10_position
+        row = _row()
+        row["收盤偏離MA10_%"] = "-1.2"
+        facts = build_chip_facts(row)
+        body = "## 當日籌碼解讀\n收盤已站上10日線，短線轉強。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma10_position", codes)
+
+    def test_ma5_ma10_alignment_mismatch_fact_check(self) -> None:
+        # facts MA5/MA10 同步偏空，正文卻寫短線偏多 → fact_ma5_ma10_alignment_mismatch
+        row = _row()
+        row["收盤偏離MA5_%"] = "-1.0"
+        row["收盤偏離MA10_%"] = "-1.0"
+        facts = build_chip_facts(row)
+        body = "## 當日籌碼解讀\n短線偏多，MA5與MA10同步偏多。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma5_ma10_alignment_mismatch", codes)
+
+    def test_ma10_ma20_alignment_mismatch_fact_check(self) -> None:
+        # facts MA10/MA20 同步偏多，正文卻寫短中線偏空 → fact_ma10_ma20_alignment_mismatch
+        row = _row()
+        row["收盤偏離MA10_%"] = "1.0"
+        row["收盤偏離MA20_%"] = "1.0"
+        facts = build_chip_facts(row)
+        body = "## 當日籌碼解讀\n短中線偏空，MA10與MA20同步偏空。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma10_ma20_alignment_mismatch", codes)
 
     def test_ma_alignment_mismatch_fact_check(self) -> None:
         # facts 短中線同步偏空，正文卻寫多頭排列 → fact_ma_alignment_mismatch

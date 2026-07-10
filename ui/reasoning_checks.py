@@ -23,8 +23,10 @@ _OBSERVABLE_KEYWORDS = (
     "融資",
     "融券",
     "MA5",
+    "MA10",
     "均線",
     "5日線",
+    "10日線",
     "成交量",
     "突破",
     "跌破",
@@ -75,7 +77,7 @@ def run_reasoning_checks(
     cross_keywords: tuple[str, ...] = ("交叉", "對照"),
     scenario_keywords: tuple[str, ...] = ("情境推演", "情境", "短中線"),
     trend_keywords: tuple[str, ...] = ("趨勢", "近"),
-    watch_keywords: tuple[str, ...] = ("觀察",),
+    watch_keywords: tuple[str, ...] = ("觀察重點",),
     min_cited_news: int = 1,
 ) -> list[ReasoningIssue]:
     text = body.strip()

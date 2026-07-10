@@ -96,7 +96,9 @@ def _fact_issues(body: str, facts) -> list[ValidationIssue]:
     ]
 
 
-def _build_position_facts(row: dict[str, str], holding: HoldingRecord):
+def _build_position_facts(
+    row: dict[str, str], holding: HoldingRecord, chip_facts=None
+):
     from position_signals import build_position_facts
 
     return build_position_facts(
@@ -105,6 +107,7 @@ def _build_position_facts(row: dict[str, str], holding: HoldingRecord):
         stock_name=str(row.get("名稱", holding.stock_id)).strip(),
         avg_cost=holding.avg_cost,
         shares=holding.shares,
+        chip_facts=chip_facts,
     )
 
 
@@ -113,11 +116,12 @@ def _position_decision_issues(
     row: dict[str, str],
     holding: HoldingRecord,
     position_facts=None,
+    chip_facts=None,
 ) -> list[ValidationIssue]:
     """部位分桶決策一致性：依損益分桶要求對應的操作內容。"""
     from position_signals import run_position_checks
 
-    pfacts = position_facts or _build_position_facts(row, holding)
+    pfacts = position_facts or _build_position_facts(row, holding, chip_facts=chip_facts)
     return [
         ValidationIssue(code, message)
         for code, message in run_position_checks(body, pfacts)
@@ -266,7 +270,9 @@ def validate_position_report(
 
     issues.extend(_fact_issues(text, facts))
     issues.extend(
-        _position_decision_issues(text, row, holding, position_facts=position_facts)
+        _position_decision_issues(
+            text, row, holding, position_facts=position_facts, chip_facts=facts
+        )
     )
     issues.extend(_reasoning_issues(text, facts, has_news=has_news))
 

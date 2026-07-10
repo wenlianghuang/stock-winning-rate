@@ -25,7 +25,7 @@ from holdings import (
 )
 from validate_position_report import ValidationResult, validate_position_report
 
-MAX_ROUNDS_DEFAULT = 5
+MAX_ROUNDS_DEFAULT = 8
 AGY_TIMEOUT_SEC = 900
 EXIT_OK = 0
 EXIT_VALIDATION_FAILED = 1
@@ -106,7 +106,9 @@ def _to_holding_info(record: HoldingRecord):
     )
 
 
-def _load_position_facts(csv_path: Path, row: dict[str, str], holding: HoldingRecord):
+def _load_position_facts(
+    csv_path: Path, row: dict[str, str], holding: HoldingRecord, chip_facts=None
+):
     """Compute deterministic position facts (pnl bucket, cost vs MA20, bias)."""
     _ensure_import_paths()
     from position_signals import (
@@ -121,6 +123,7 @@ def _load_position_facts(csv_path: Path, row: dict[str, str], holding: HoldingRe
         stock_name=str(row.get("名稱", holding.stock_id)).strip(),
         avg_cost=holding.avg_cost,
         shares=holding.shares,
+        chip_facts=chip_facts,
     )
     facts_path = csv_path.with_name(f"{csv_path.stem}.position.facts.json")
     try:
@@ -242,6 +245,10 @@ POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
     "position_profit_no_plan": "此部位小幅獲利，操作情境須談加碼條件/停利/續抱或獲利回吐風險",
     "position_breakeven_no_trigger": "此部位接近損益兩平，操作情境須給明確的出場或加碼觸發條件",
     "position_scenario_unanchored": "操作情境須錨定部位損益（獲利/虧損/成本/均價/套牢），勿泛泛而談",
+    "position_scenario_label_missing": "操作情境須列出系統給定的三種市場情境名稱（延續調節/橫盤整理/技術反彈）",
+    "position_scenario_weight_missing": "操作情境須標示各情境的權重百分比（與系統一致，加總 100%）",
+    "position_scenario_primary_unmarked": "操作情境須標示主線（最高權重情境 +「主線」）",
+    "position_scenario_primary_add_forbidden": "防禦/謹慎傾向下，主線情境不可以加碼為主",
     "missing_action_direction": "操作情境須提及觀望/減碼/加碼/停損/獲利了結/持有等方向",
     "missing_trigger_conditions": "操作情境須補上觸發條件或可觀察訊號",
     "reasoning_cross_no_evidence": "部位與市場交叉對照須同時引用籌碼與新聞/市場依據",
@@ -294,7 +301,8 @@ def build_fix_prompt(
         "- 市場面須明確引用 facts 概念（至少 2 項）\n"
         "- 籌碼與部位數字由系統表格自動產生，正文勿重複列數字\n"
         "- 須含部位現況、市場面摘要、交叉對照、操作情境、風險提醒、免責聲明\n"
-        "- 操作情境須含觸發條件，並提及觀望/減碼/加碼/停損/獲利了結等方向\n"
+        "- 操作情境須含觸發條件，並依系統給定的三種市場情境權重（勿改百分比）撰寫\n"
+        "- 操作情境須標示主線/次線/尾線，並提及觀望/減碼/加碼/停損/獲利了結等方向\n"
         "- 市場面須客觀，勿因成本扭曲籌碼解讀\n"
         "- 交叉對照、操作情境、風險提醒請用**文字條列**，不要用表格\n"
         "- 不可臆造新聞；僅能引用系統提供的新聞或註明缺少新聞\n"
@@ -513,7 +521,9 @@ def run_gate(
 ) -> int:
     row = parse_csv_row(csv_path)
     facts, facts_summary = _load_chip_facts(csv_path)
-    position_facts, position_facts_summary = _load_position_facts(csv_path, row, holding)
+    position_facts, position_facts_summary = _load_position_facts(
+        csv_path, row, holding, chip_facts=facts
+    )
     news_text = fetch_news_text(row)
     has_news = bool(news_text and news_text.strip())
     log_path = csv_path.with_name(f"{csv_path.stem}.position.gate.log")

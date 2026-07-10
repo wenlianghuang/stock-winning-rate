@@ -59,6 +59,25 @@ MA5_BELOW_PHRASES = (
     "跌破5日線",
     "跌破5日均線",
 )
+
+MA10_ABOVE_PHRASES = (
+    "站上MA10",
+    "站回MA10",
+    "站上10日線",
+    "站回10日線",
+    "站上10日均線",
+    "站回10日均線",
+    "突破10日線",
+    "收復10日線",
+)
+MA10_BELOW_PHRASES = (
+    "跌破MA10",
+    "跌破10日線",
+    "失守10日線",
+    "跌破10日均線",
+    "10日線下方",
+    "10日線之下",
+)
 MA20_ABOVE_PHRASES = (
     "站上MA20",
     "站上月線",
@@ -90,6 +109,32 @@ MA_ALIGN_BEARISH_PHRASES = (
     "短中線偏空",
     "短中線同步偏空",
     "均線下彎",
+)
+
+# MA5 vs MA10（短線）與 MA10 vs MA20（短中線）用語（避免與 legacy 的 MA5 vs MA20 混用）
+MA5_MA10_BULLISH_PHRASES = (
+    "MA5與MA10同步偏多",
+    "MA5/MA10同步偏多",
+    "短線同步偏多",
+    "短線偏多",
+)
+MA5_MA10_BEARISH_PHRASES = (
+    "MA5與MA10同步偏空",
+    "MA5/MA10同步偏空",
+    "短線同步偏空",
+    "短線偏空",
+)
+MA10_MA20_BULLISH_PHRASES = (
+    "MA10與MA20同步偏多",
+    "MA10/MA20同步偏多",
+    "短中線同步偏多",
+    "短中線偏多",
+)
+MA10_MA20_BEARISH_PHRASES = (
+    "MA10與MA20同步偏空",
+    "MA10/MA20同步偏空",
+    "短中線同步偏空",
+    "短中線偏空",
 )
 # short_rebound：站上 MA5 但仍在 MA20 下，不可寫成同步偏多或中期已轉強
 MA_ALIGN_REBOUND_DENY_PHRASES = MA_ALIGN_BULLISH_PHRASES + (
@@ -229,10 +274,20 @@ def _current_state_region(text: str) -> str:
 def _slice_after_keywords(body: str, keywords: tuple[str, ...]) -> str:
     lines = body.splitlines()
     start = None
+    # Prefer ``##`` section headings so inline text (e.g. 可觀察訊號 in 情境推演)
+    # does not steal the slice from the intended chapter.
     for index, line in enumerate(lines):
-        if any(keyword in line for keyword in keywords):
+        stripped = line.strip()
+        if re.match(r"^##\s+", stripped) and any(
+            keyword in stripped for keyword in keywords
+        ):
             start = index + 1
             break
+    if start is None:
+        for index, line in enumerate(lines):
+            if any(keyword in line for keyword in keywords):
+                start = index + 1
+                break
     if start is None:
         return ""
 
@@ -272,6 +327,8 @@ def _count_fact_citations(text: str, facts) -> tuple[int, int]:
         concepts.append(
             "MA5" in text or "均線" in text or "5日線" in text or "5 日線" in text
         )
+    if getattr(facts, "ma10_position", "unknown") in {"above", "below"}:
+        concepts.append("MA10" in text or "10日線" in text or "10 日線" in text)
     if getattr(facts, "ma20_position", "unknown") in {"above", "below"}:
         concepts.append("MA20" in text or "月線" in text or "20日線" in text)
     if getattr(facts, "price_trend", "unknown") in {"up", "down"}:
@@ -349,6 +406,25 @@ def run_fact_checks(
                 )
             )
 
+    ma10_position = getattr(facts, "ma10_position", "unknown")
+    if ma10_position in {"above", "below"}:
+        above = _contains_any(region, MA10_ABOVE_PHRASES)
+        below = _contains_any(region, MA10_BELOW_PHRASES)
+        if ma10_position == "below" and above and not below:
+            issues.append(
+                (
+                    "fact_ma10_position",
+                    f"收盤低於 MA10（10 日線），但現況段出現「{above}」，與系統 facts 矛盾",
+                )
+            )
+        elif ma10_position == "above" and below and not above:
+            issues.append(
+                (
+                    "fact_ma10_position",
+                    f"收盤高於 MA10（10 日線），但現況段出現「{below}」，與系統 facts 矛盾",
+                )
+            )
+
     ma20_position = getattr(facts, "ma20_position", "unknown")
     if ma20_position in {"above", "below"}:
         above = _contains_any(region, MA20_ABOVE_PHRASES)
@@ -411,6 +487,47 @@ def run_fact_checks(
                         f"正文卻描述「{deny}」，與短中線型態矛盾",
                     )
                 )
+
+    # New pairwise alignments (B): MA5 vs MA10, MA10 vs MA20
+    ma_short = getattr(facts, "ma_short_alignment", "unknown")
+    if ma_short in {"bullish", "bearish"}:
+        stripped = _strip_tables(text)
+        bull = _contains_any(stripped, MA5_MA10_BULLISH_PHRASES)
+        bear = _contains_any(stripped, MA5_MA10_BEARISH_PHRASES)
+        if ma_short == "bullish" and bear and not bull:
+            issues.append(
+                (
+                    "fact_ma5_ma10_alignment_mismatch",
+                    f"facts 判定 MA5 vs MA10 同步偏多，正文卻描述「{bear}」，與短線對齊矛盾",
+                )
+            )
+        elif ma_short == "bearish" and bull and not bear:
+            issues.append(
+                (
+                    "fact_ma5_ma10_alignment_mismatch",
+                    f"facts 判定 MA5 vs MA10 同步偏空，正文卻描述「{bull}」，與短線對齊矛盾",
+                )
+            )
+
+    ma_mid = getattr(facts, "ma_mid_alignment", "unknown")
+    if ma_mid in {"bullish", "bearish"}:
+        stripped = _strip_tables(text)
+        bull = _contains_any(stripped, MA10_MA20_BULLISH_PHRASES)
+        bear = _contains_any(stripped, MA10_MA20_BEARISH_PHRASES)
+        if ma_mid == "bullish" and bear and not bull:
+            issues.append(
+                (
+                    "fact_ma10_ma20_alignment_mismatch",
+                    f"facts 判定 MA10 vs MA20 同步偏多，正文卻描述「{bear}」，與短中線對齊矛盾",
+                )
+            )
+        elif ma_mid == "bearish" and bull and not bear:
+            issues.append(
+                (
+                    "fact_ma10_ma20_alignment_mismatch",
+                    f"facts 判定 MA10 vs MA20 同步偏空，正文卻描述「{bull}」，與短中線對齊矛盾",
+                )
+            )
 
     volume_anomaly = getattr(facts, "volume_anomaly", "unknown")
     if volume_anomaly in {"spike", "shrink"}:

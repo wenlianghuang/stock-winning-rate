@@ -18,7 +18,7 @@ from pathlib import Path
 
 from validate_report import ValidationResult, validate_single_stock_report
 
-MAX_ROUNDS_DEFAULT = 5
+MAX_ROUNDS_DEFAULT = 8
 AGY_TIMEOUT_SEC = 900
 EXIT_OK = 0
 EXIT_VALIDATION_FAILED = 1
@@ -157,8 +157,11 @@ def build_initial_prompt(
 FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_foreign_direction": "外資方向與系統 facts 相反，請改為與 facts 一致的買/賣方向描述",
     "fact_ma5_position": "收盤相對 MA5 的位置與 facts 相反，請依 facts 修正站上/跌破描述",
+    "fact_ma10_position": "收盤相對 MA10（10 日線）的位置與 facts 相反，請依 facts 修正站上/跌破 10 日線描述",
     "fact_ma20_position": "收盤相對 MA20（月線）的位置與 facts 相反，請依 facts 修正站上/跌破月線描述",
     "fact_ma_alignment_mismatch": "短中線均線排列（MA5 vs MA20）敘述與 facts 矛盾，請依系統判定的短中線方向修正",
+    "fact_ma5_ma10_alignment_mismatch": "短線均線對齊（MA5 vs MA10）敘述與 facts 矛盾，請依系統判定的短線方向修正",
+    "fact_ma10_ma20_alignment_mismatch": "短中線均線對齊（MA10 vs MA20）敘述與 facts 矛盾，請依系統判定的短中線方向修正",
     "fact_volume_mismatch": "成交量描述與 facts（放量/縮量）矛盾，請依系統量能判定修正",
     "fact_price_trend_mismatch": "區間價格趨勢描述與 facts（price_trend）矛盾，請依區間漲跌方向修正",
     "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，正文不可描述為籌碼健康或量價配合良好",
@@ -169,11 +172,13 @@ FIX_HINT_BY_CODE: dict[str, str] = {
     "anchors_underused": "正文引用的系統 anchors 不足，請在趨勢/交叉對照章節明確引用至少 2 條 anchors",
     "missing_trend_analysis": "請補「近 N 日籌碼趨勢」章節，明確描述延續/轉折/背離",
     "reasoning_cross_no_evidence": "交叉對照須同時引用籌碼與新聞依據，說明一致或背離",
-    "reasoning_scenario_no_trigger": "情境推演須寫明觸發條件（若…則…）與可觀察訊號",
+    "reasoning_scenario_no_trigger": "情境推演須寫明觸發條件（若…則…）與可追蹤訊號（勿用「觀察」二字）",
+    "sparse_watch": "「觀察重點」章節須至少 2 點編號條列，每點含可追蹤指標（外資/均線/成交量等）",
+    "missing_stock_id": "正文須至少一次寫出股票代碼（例：友達（2409））",
     "reasoning_trend_no_continuation": "外資有連續買賣時，趨勢段須描述延續/轉折/背離",
     "reasoning_major_foreign_unmentioned": "主力與外資背離時，趨勢或交叉段須點出分歧",
     "reasoning_watch_not_actionable": "觀察重點須含可追蹤指標（外資/均線/成交量等）",
-    "reasoning_news_uncited": "請在交叉對照或趨勢段引用至少一則新聞標題關鍵字",
+    "reasoning_news_uncited": "交叉對照或趨勢段須原文引用至少一則新聞標題（勿改寫標題文字）",
 }
 
 
