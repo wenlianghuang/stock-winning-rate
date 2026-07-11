@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Winning Rate</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --up: #22c55e;
+      --down: #ef4444;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .tab {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .tab.active {
+      background: var(--panel);
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .panel {
+      display: none;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .panel.active { display: block; }
+    .index-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .index-card {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      min-height: 96px;
+    }
+    .index-card .label {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .index-card .symbol {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .index-card .price {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .index-card .change {
+      margin-top: 6px;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .index-card .change.up { color: var(--up); }
+    .index-card .change.down { color: var(--down); }
+    .index-card .change.flat { color: var(--muted); }
+    .meta {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .status {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .status.error { color: var(--down); }
+    @media (max-width: 720px) {
+      .index-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>Stock Winning Rate</h1>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="tw" role="tab" aria-selected="true">台股</button>
+      <button class="tab" data-tab="us" role="tab" aria-selected="false">美股</button>
+    </div>
+
+    <section id="panel-tw" class="panel active" role="tabpanel">
+      <p class="status">台股分析請使用 API <code>/jobs</code> 或 chat 指令 <code>/stock</code>。</p>
+    </section>
+
+    <section id="panel-us" class="panel" role="tabpanel">
+      <div id="index-row" class="index-row" aria-live="polite"></div>
+      <p id="us-status" class="status">載入美股指數中…</p>
+      <p id="us-meta" class="meta"></p>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = window.STOCK_API_BASE || "";
+
+    function fmtPrice(value) {
+      if (value == null) return "—";
+      return Number(value).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+
+    function fmtChange(value) {
+      if (value == null) return { text: "—", cls: "flat" };
+      const sign = value > 0 ? "+" : "";
+      const cls = value > 0 ? "up" : value < 0 ? "down" : "flat";
+      return { text: `${sign}${value.toFixed(2)}%`, cls };
+    }
+
+    function renderIndices(indices) {
+      const row = document.getElementById("index-row");
+      row.innerHTML = indices.map((item) => {
+        const change = fmtChange(item.change_pct);
+        return `
+          <article class="index-card">
+            <div class="label">${item.short_name || item.name}</div>
+            <div class="symbol">${item.symbol}</div>
+            <div class="price">${fmtPrice(item.price)}</div>
+            <div class="change ${change.cls}">${change.text}</div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadUsIndices() {
+      const status = document.getElementById("us-status");
+      const meta = document.getElementById("us-meta");
+      status.textContent = "載入美股指數中…";
+      status.classList.remove("error");
+      try {
+        const response = await fetch(`${API_BASE}/us-indices`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        renderIndices(payload.indices || []);
+        status.textContent = "美股指數已更新";
+        meta.textContent = [
+          payload.delay_note || "",
+          payload.fetched_at ? `更新：${payload.fetched_at}` : "",
+        ].filter(Boolean).join(" · ");
+      } catch (err) {
+        status.textContent = `無法載入美股指數：${err.message}`;
+        status.classList.add("error");
+        meta.textContent = "";
+      }
+    }
+
+    let usLoaded = false;
+    const tabs = document.querySelectorAll(".tab");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab;
+        tabs.forEach((btn) => {
+          const active = btn.dataset.tab === target;
+          btn.classList.toggle("active", active);
+          btn.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        document.querySelectorAll(".panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `panel-${target}`);
+        });
+        if (target === "us" && !usLoaded) {
+          usLoaded = true;
+          loadUsIndices();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

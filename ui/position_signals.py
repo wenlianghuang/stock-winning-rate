@@ -95,6 +95,23 @@ SCENARIO_TRIGGER_HINTS = {
     "rebound": "若站回 MA10 且量能溫和放大",
 }
 
+STOP_LEVEL_KEYWORDS = (
+    "近20日低",
+    "20日低",
+    "前低",
+    "區間低點",
+    "支撐區",
+    "停損參考",
+)
+TARGET_LEVEL_KEYWORDS = (
+    "近20日高",
+    "20日高",
+    "前高",
+    "壓力區",
+    "停利參考",
+    "解套參考",
+)
+
 FactIssue = tuple[str, str]
 
 
@@ -124,8 +141,15 @@ class PositionFacts:
     unrealized_pnl_pct: float | None
     pnl_bucket: str
     cost_vs_ma20: str  # "above" | "below" | "at" | "unknown"
-    breakeven_move_pct: float | None  # 價格須變動多少 % 才回到成本（正=須上漲）
     position_bias: str
+    breakeven_move_pct: float | None = None  # 價格須變動多少 % 才回到成本（正=須上漲）
+    cost_vs_20d_high: str = "unknown"
+    high_20d: float | None = None
+    low_20d: float | None = None
+    technical_stop_price: float | None = None
+    technical_target_price: float | None = None
+    stop_loss_hint: str = ""
+    take_profit_hint: str = ""
     required_action_hint: str = ""
     scenario_plan: ScenarioPlan | None = None
     anchors: list[str] = field(default_factory=list)
@@ -166,6 +190,93 @@ def _cost_vs_ma20(avg_cost: float, ma20: float | None) -> str:
     if diff_pct < -0.3:
         return "below"
     return "at"
+
+
+def _cost_vs_level(avg_cost: float, level: float | None) -> str:
+    if level is None or level <= 0 or avg_cost <= 0:
+        return "unknown"
+    diff_pct = (avg_cost - level) / level * 100.0
+    if diff_pct > 0.3:
+        return "above"
+    if diff_pct < -0.3:
+        return "below"
+    return "at"
+
+
+def _fmt_price(price: float | None) -> str:
+    if price is None:
+        return ""
+    if price == int(price):
+        return str(int(price))
+    return f"{price:.2f}".rstrip("0").rstrip(".")
+
+
+def _build_trade_levels(
+    *,
+    avg_cost: float,
+    close_price: float | None,
+    high_20d: float | None,
+    low_20d: float | None,
+    pnl_bucket: str,
+    atr_pct: float | None = None,
+    atr_14: float | None = None,
+    volatility_regime: str = "unknown",
+) -> dict[str, object]:
+    empty: dict[str, object] = {
+        "technical_stop_price": None,
+        "technical_target_price": None,
+        "stop_loss_hint": "",
+        "take_profit_hint": "",
+    }
+    if low_20d is None or low_20d <= 0:
+        return empty
+
+    stop_price = round(low_20d, 2)
+    stop_hint = f"停損參考：收盤跌破近20日低 {_fmt_price(stop_price)}"
+    if volatility_regime == "high" and atr_pct is not None:
+        stop_hint += f"；波動偏高（ATR約 {atr_pct:.1f}%），停損宜保守"
+        if close_price is not None and atr_14 is not None:
+            atr_stop = round(max(close_price - 2 * atr_14, 0), 2)
+            stop_hint += f"；2×ATR 參考 {_fmt_price(atr_stop)}"
+    elif volatility_regime == "low":
+        stop_hint += "；波動偏低，區間高低參考較可靠"
+
+    if pnl_bucket in {"profit_large", "profit_small"} and high_20d is not None:
+        target_price = round(high_20d, 2)
+        target_hint = f"停利參考：近20日高 {_fmt_price(target_price)}"
+    elif pnl_bucket in {"loss_small", "loss_large", "breakeven"}:
+        target_price = round(avg_cost, 2)
+        if high_20d is not None:
+            target_hint = (
+                f"解套參考：均價 {_fmt_price(target_price)}；"
+                f"上方壓力近20日高 {_fmt_price(round(high_20d, 2))}"
+            )
+        else:
+            target_hint = f"解套參考：均價 {_fmt_price(target_price)}"
+    elif high_20d is not None:
+        target_price = round(high_20d, 2)
+        target_hint = f"壓力參考：近20日高 {_fmt_price(target_price)}"
+    else:
+        target_price = None
+        target_hint = ""
+
+    return {
+        "technical_stop_price": stop_price,
+        "technical_target_price": target_price,
+        "stop_loss_hint": stop_hint,
+        "take_profit_hint": target_hint,
+    }
+
+
+def _range_levels_from_chip_or_row(row: dict, chip_facts) -> tuple[float | None, float | None]:
+    if chip_facts is not None:
+        high = getattr(chip_facts, "high_20d", None)
+        low = getattr(chip_facts, "low_20d", None)
+        if high is not None and low is not None:
+            return high, low
+    high = _to_float(row.get("區間20日高"))
+    low = _to_float(row.get("區間20日低"))
+    return high, low
 
 
 def _position_bias(bucket: str) -> str:
@@ -280,6 +391,84 @@ def build_scenario_plan(
     elif foreign_dir > 0:
         scores["rebound"] += 4
 
+    volume_price_div = getattr(chip_facts, "volume_price_divergence", "unknown")
+    if volume_price_div == "bearish_divergence":
+        scores["continuation"] += 5
+        scores["rebound"] -= 3
+    elif volume_price_div == "confirming_up":
+        scores["rebound"] += 5
+        scores["continuation"] -= 3
+    elif volume_price_div == "bullish_divergence":
+        scores["rebound"] += 3
+    elif volume_price_div == "confirming_down":
+        scores["continuation"] += 3
+
+    rsi_zone = getattr(chip_facts, "rsi_zone", "unknown")
+    if rsi_zone == "oversold":
+        scores["rebound"] += 5
+        scores["continuation"] -= 3
+    elif rsi_zone == "overbought":
+        scores["continuation"] += 5
+        scores["rebound"] -= 3
+
+    volatility_regime = getattr(chip_facts, "volatility_regime", "unknown")
+    if volatility_regime == "high":
+        scores["range"] += 5
+        scores["rebound"] -= 3
+        scores["continuation"] += 2
+    elif volatility_regime == "low":
+        scores["rebound"] += 3
+        scores["continuation"] -= 2
+
+    trend_strength = getattr(chip_facts, "trend_strength", "unknown")
+    if trend_strength == "weak":
+        scores["range"] += 8
+        scores["rebound"] -= 3
+        scores["continuation"] -= 3
+    elif trend_strength == "strong":
+        scores["range"] -= 5
+        if ma_mid in {"bullish", "short_pullback"}:
+            scores["rebound"] += 5
+            scores["continuation"] -= 3
+        elif ma_mid in {"bearish", "short_rebound"}:
+            scores["continuation"] += 5
+            scores["rebound"] -= 3
+        else:
+            scores["continuation"] += 3
+
+    margin_ratio_zone = getattr(chip_facts, "margin_short_ratio_zone", "unknown")
+    if margin_ratio_zone == "high":
+        scores["continuation"] += 4
+        scores["rebound"] -= 2
+    elif margin_ratio_zone == "low":
+        scores["rebound"] += 3
+
+    margin_momentum = getattr(chip_facts, "margin_momentum", "unknown")
+    if margin_momentum == "heating":
+        scores["continuation"] += 4
+        scores["rebound"] -= 2
+        if price_trend == "down":
+            scores["continuation"] += 3
+    elif margin_momentum == "cooling":
+        scores["range"] += 4
+        scores["continuation"] -= 2
+
+    ma5_cross = getattr(chip_facts, "ma5_cross_ma10", "unknown")
+    ma5_cross_recency = getattr(chip_facts, "ma5_cross_recency", "unknown")
+    if ma5_cross == "golden" and ma5_cross_recency in {"today", "within_3d"}:
+        scores["rebound"] += 5
+        scores["continuation"] -= 3
+    elif ma5_cross == "death" and ma5_cross_recency in {"today", "within_3d"}:
+        scores["continuation"] += 5
+        scores["rebound"] -= 3
+
+    ma10_cross = getattr(chip_facts, "ma10_cross_ma20", "unknown")
+    ma10_cross_recency = getattr(chip_facts, "ma10_cross_recency", "unknown")
+    if ma10_cross == "golden" and ma10_cross_recency in {"today", "within_3d"}:
+        scores["rebound"] += 4
+    elif ma10_cross == "death" and ma10_cross_recency in {"today", "within_3d"}:
+        scores["continuation"] += 4
+
     bias = position_facts.position_bias
     if bias == "defensive":
         scores["continuation"] += 10
@@ -290,6 +479,9 @@ def build_scenario_plan(
     elif bias == "protect_gains":
         scores["range"] += 6
         scores["rebound"] -= 4
+        if getattr(chip_facts, "rsi_zone", "unknown") == "overbought":
+            scores["range"] += 4
+            scores["rebound"] -= 2
 
     weights = _normalize_weights(scores)
     primary_id = max(weights, key=weights.get)
@@ -331,6 +523,22 @@ def build_position_facts(
 
     bucket = _pnl_bucket(pnl_pct)
     cost_ma20 = _cost_vs_ma20(avg_cost, ma20)
+    high_20d, low_20d = _range_levels_from_chip_or_row(row, chip_facts)
+    cost_vs_high = _cost_vs_level(avg_cost, high_20d)
+    trade_levels = _build_trade_levels(
+        avg_cost=avg_cost,
+        close_price=close_price,
+        high_20d=high_20d,
+        low_20d=low_20d,
+        pnl_bucket=bucket,
+        atr_pct=getattr(chip_facts, "atr_pct", None) if chip_facts else None,
+        atr_14=getattr(chip_facts, "atr_14", None) if chip_facts else None,
+        volatility_regime=(
+            getattr(chip_facts, "volatility_regime", "unknown")
+            if chip_facts
+            else "unknown"
+        ),
+    )
     bias = _position_bias(bucket)
 
     facts = PositionFacts(
@@ -342,6 +550,13 @@ def build_position_facts(
         unrealized_pnl_pct=round(pnl_pct, 2) if pnl_pct is not None else None,
         pnl_bucket=bucket,
         cost_vs_ma20=cost_ma20,
+        cost_vs_20d_high=cost_vs_high,
+        high_20d=high_20d,
+        low_20d=low_20d,
+        technical_stop_price=trade_levels["technical_stop_price"],  # type: ignore[arg-type]
+        technical_target_price=trade_levels["technical_target_price"],  # type: ignore[arg-type]
+        stop_loss_hint=str(trade_levels["stop_loss_hint"]),
+        take_profit_hint=str(trade_levels["take_profit_hint"]),
         breakeven_move_pct=round(breakeven_move, 2) if breakeven_move is not None else None,
         position_bias=bias,
         required_action_hint=_required_action_hint(bucket),
@@ -370,6 +585,20 @@ def _build_anchors(facts: PositionFacts) -> list[str]:
         anchors.append("持股均價高於 MA20（月線在成本下方，中期反壓偏重）")
     elif facts.cost_vs_ma20 == "below":
         anchors.append("持股均價低於 MA20（成本在月線下方，中期仍有支撐）")
+    if facts.cost_vs_20d_high == "above" and facts.high_20d is not None:
+        anchors.append(
+            f"持股均價高於近20日高 {_fmt_price(facts.high_20d)}"
+            "（解套須先過前高壓力）"
+        )
+    elif facts.cost_vs_20d_high == "below" and facts.high_20d is not None:
+        anchors.append(
+            f"持股均價低於近20日高 {_fmt_price(facts.high_20d)}"
+            "（前高仍有參考壓力/停利區）"
+        )
+    if facts.stop_loss_hint:
+        anchors.append(facts.stop_loss_hint)
+    if facts.take_profit_hint:
+        anchors.append(facts.take_profit_hint)
     anchors.append(POSITION_BIAS_LABEL[facts.position_bias])
 
     if facts.scenario_plan:
@@ -422,6 +651,17 @@ def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
     if facts.cost_vs_ma20 != "unknown":
         pos = {"above": "高於", "below": "低於", "at": "貼近"}[facts.cost_vs_ma20]
         lines.append(f"- 持股均價{pos} MA20（月線）")
+    if facts.high_20d is not None and facts.low_20d is not None:
+        lines.append(
+            f"- 近20日區間：低 {_fmt_price(facts.low_20d)} / 高 {_fmt_price(facts.high_20d)}"
+        )
+    if facts.cost_vs_20d_high != "unknown" and facts.high_20d is not None:
+        pos = {"above": "高於", "below": "低於", "at": "貼近"}[facts.cost_vs_20d_high]
+        lines.append(f"- 持股均價{pos}近20日高")
+    if facts.stop_loss_hint:
+        lines.append(f"- {facts.stop_loss_hint}")
+    if facts.take_profit_hint:
+        lines.append(f"- {facts.take_profit_hint}")
     lines.append(f"- 系統傾向：{POSITION_BIAS_LABEL[facts.position_bias]}")
     if facts.required_action_hint:
         lines.append(f"- 操作情境至少須明確提及：{facts.required_action_hint}")
@@ -432,6 +672,34 @@ def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _price_mentioned(text: str, price: float | None) -> bool:
+    if price is None or price <= 0:
+        return False
+    normalized = text.replace(",", "")
+    candidates = {
+        f"{price:.2f}",
+        f"{price:.1f}",
+        str(int(round(price))),
+        _fmt_price(price),
+    }
+    return any(candidate and candidate in normalized for candidate in candidates)
+
+
+def _mentions_stop_level(text: str, facts: PositionFacts) -> bool:
+    if _price_mentioned(text, facts.technical_stop_price):
+        return True
+    return _contains_any(text, STOP_LEVEL_KEYWORDS)
+
+
+def _mentions_target_level(text: str, facts: PositionFacts) -> bool:
+    if _price_mentioned(text, facts.technical_target_price):
+        return True
+    if facts.pnl_bucket in {"loss_small", "loss_large", "breakeven"}:
+        if _price_mentioned(text, facts.avg_cost):
+            return True
+    return _contains_any(text, TARGET_LEVEL_KEYWORDS)
 
 
 def _primary_action_forbids_add(primary_action: str) -> bool:
@@ -531,6 +799,16 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
                     "操作情境須提出停利/移動停損/獲利了結，或明確論證續抱理由",
                 )
             )
+        elif facts.technical_target_price is not None and not _mentions_target_level(
+            region, facts
+        ):
+            issues.append(
+                (
+                    "position_target_level_missing",
+                    f"系統停利參考為近20日高 {_fmt_price(facts.technical_target_price)}，"
+                    "操作情境須引用該價位或近20日高/壓力區",
+                )
+            )
     elif bucket == "profit_small":
         if not _contains_any(region, PROFIT_SMALL_KEYWORDS):
             issues.append(
@@ -558,6 +836,24 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
                     "position_loss_no_risk_control",
                     f"部位未實現損益約 {facts.unrealized_pnl_pct:.1f}%（虧損），"
                     "操作情境須提出停損/減碼/出場等具體防禦手段",
+                )
+            )
+        elif facts.technical_stop_price is not None and not _mentions_stop_level(
+            region, facts
+        ):
+            issues.append(
+                (
+                    "position_stop_level_missing",
+                    f"系統停損參考為近20日低 {_fmt_price(facts.technical_stop_price)}，"
+                    "操作情境須引用該價位或近20日低/前低",
+                )
+            )
+        elif facts.take_profit_hint and not _mentions_target_level(region, facts):
+            issues.append(
+                (
+                    "position_target_level_missing",
+                    f"虧損部位須提及解套參考（均價 {_fmt_price(facts.avg_cost)}）"
+                    "或上方壓力區",
                 )
             )
 

@@ -234,7 +234,18 @@ POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_ma_alignment_mismatch": "短中線均線排列（MA5 vs MA20）敘述與 facts 矛盾，請依系統判定修正",
     "fact_ma_stack_mismatch": "均線排列（MA5/MA10/MA20 結構）敘述與 facts 矛盾，請依系統判定修正",
     "fact_ma20_slope_mismatch": "月線（MA20）斜率敘述與 facts 矛盾，請依系統判定修正",
+    "fact_rsi_zone_mismatch": "RSI 動能敘述與 facts 矛盾，請依系統判定的 RSI 偏高/偏低/中性修正",
+    "fact_volatility_regime_mismatch": "ATR 波動敘述與 facts 矛盾，請依系統判定的波動偏高/偏低/正常修正",
+    "fact_trend_strength_mismatch": "ADX 趨勢強度敘述與 facts 矛盾，請依系統判定的趨勢明確/偏弱/中性修正",
+    "fact_margin_short_ratio_mismatch": "券資比敘述與 facts 矛盾，請依系統判定的券資比偏高/偏低/中性修正",
+    "fact_margin_momentum_mismatch": "融資動能敘述與 facts 矛盾，請依系統判定的融資動能偏強/偏弱/平穩修正",
+    "fact_ma5_ma10_cross_mismatch": "MA5/MA10 均線交叉敘述與 facts 矛盾，請依系統判定修正",
+    "fact_ma10_ma20_cross_mismatch": "MA10/MA20 均線交叉敘述與 facts 矛盾，請依系統判定修正",
+    "position_stop_level_missing": "操作情境須引用系統停損參考價（近20日低）或前低/支撐區",
+    "position_target_level_missing": "操作情境須引用系統停利/解套參考價（近20日高或均價）",
     "fact_volume_mismatch": "成交量描述與 facts（放量/縮量）矛盾，請依系統量能判定修正",
+    "fact_volume_trend_mismatch": "量能趨勢（5日/20日均量）描述與 facts 矛盾，請依系統判定修正",
+    "fact_volume_price_divergence_mismatch": "價量關係描述與 facts 矛盾，請依系統價量判定修正",
     "fact_price_trend_mismatch": "區間價格趨勢描述與 facts 矛盾，請依區間漲跌方向修正",
     "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，市場面不可描述為籌碼健康",
     "fact_chip_regime_mismatch": "市場面籌碼型態敘述與 facts 的 chip_regime 矛盾",
@@ -656,6 +667,10 @@ def run_gate(
             md_path, pdf_path = write_position_artifacts(
                 csv_path, body, meta, holding_info
             )
+            _ensure_import_paths()
+            from report_summary import merge_position_summary
+
+            merge_position_summary(csv_path, position_facts, body)
             print(f"驗證通過（第 {round_no} 輪）", file=sys.stderr)
             print(f"Markdown: {md_path.resolve()}")
             if pdf_path and not skip_pdf:

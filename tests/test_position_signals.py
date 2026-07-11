@@ -23,6 +23,12 @@ def _row(close: str, ma20: str = "50", **overrides) -> dict[str, str]:
         "日期": "2026-07-06",
         "收盤價": close,
         "MA20": ma20,
+        "區間20日高": "55",
+        "區間20日低": "45",
+        "距20日高_%": "9.09",
+        "距20日低_%": "11.11",
+        "突破20日高": "否",
+        "跌破20日低": "否",
         "外資買賣超_張": "-500",
         "投信買賣超_張": "-100",
         "自營商買賣超_張": "-50",
@@ -60,6 +66,10 @@ def _scenario_body(facts) -> str:
     plan = facts.scenario_plan
     assert plan is not None
     lines = ["## 操作情境", "部位目前虧損，須依成本與均價設防。"]
+    if facts.stop_loss_hint:
+        lines.append(f"- {facts.stop_loss_hint}")
+    if facts.take_profit_hint:
+        lines.append(f"- {facts.take_profit_hint}")
     rank_labels = ("主線", "次線", "尾線")
     for index, item in enumerate(plan.scenarios):
         rank = rank_labels[index]
@@ -75,11 +85,24 @@ class PositionBucketTests(unittest.TestCase):
         f = _facts(40.0, "50")  # +25%
         self.assertEqual(f.pnl_bucket, "profit_large")
         self.assertEqual(f.position_bias, "protect_gains")
+        self.assertEqual(f.technical_stop_price, 45.0)
+        self.assertEqual(f.technical_target_price, 55.0)
 
     def test_loss_large_bucket(self) -> None:
         f = _facts(60.0, "50")  # -16.7%
         self.assertEqual(f.pnl_bucket, "loss_large")
         self.assertEqual(f.position_bias, "defensive")
+        self.assertIn("停損參考", f.stop_loss_hint)
+        self.assertIn("解套參考", f.take_profit_hint)
+
+    def test_high_volatility_enriches_stop_hint(self) -> None:
+        f = _facts(
+            60.0,
+            "50",
+            **{"ATR14": "2.5", "ATR14_%": "5.0"},
+        )
+        self.assertIn("波動偏高", f.stop_loss_hint)
+        self.assertIn("2×ATR", f.stop_loss_hint)
 
     def test_breakeven_bucket(self) -> None:
         f = _facts(50.0, "50")  # 0%
@@ -88,6 +111,10 @@ class PositionBucketTests(unittest.TestCase):
     def test_cost_vs_ma20(self) -> None:
         self.assertEqual(_facts(60.0, "50", "55").cost_vs_ma20, "above")
         self.assertEqual(_facts(40.0, "50", "55").cost_vs_ma20, "below")
+
+    def test_cost_vs_20d_high(self) -> None:
+        self.assertEqual(_facts(60.0, "50").cost_vs_20d_high, "above")
+        self.assertEqual(_facts(40.0, "50").cost_vs_20d_high, "below")
 
 
 class ScenarioPlanTests(unittest.TestCase):
@@ -145,9 +172,26 @@ class PositionCheckTests(unittest.TestCase):
 
     def test_loss_with_stop_passes_bucket_checks(self) -> None:
         f = _facts(60.0, "50")
-        body = "## 操作情境\n- 虧損擴大，若跌破前低則停損減碼\n"
+        body = (
+            "## 操作情境\n"
+            f"- 虧損擴大，若跌破近20日低 {f.technical_stop_price} 則停損減碼\n"
+            f"- {f.take_profit_hint}\n"
+        )
         codes = [c for c, _ in run_position_checks(body, f)]
         self.assertNotIn("position_loss_no_risk_control", codes)
+        self.assertNotIn("position_stop_level_missing", codes)
+
+    def test_loss_missing_stop_level_fails(self) -> None:
+        f = _facts(60.0, "50")
+        body = "## 操作情境\n- 虧損擴大，續抱等待反彈並減碼\n"
+        codes = [c for c, _ in run_position_checks(body, f)]
+        self.assertIn("position_stop_level_missing", codes)
+
+    def test_profit_large_missing_target_fails(self) -> None:
+        f = _facts(40.0, "50")
+        body = "## 操作情境\n- 大幅獲利，採移動停損續抱\n"
+        codes = [c for c, _ in run_position_checks(body, f)]
+        self.assertIn("position_target_level_missing", codes)
 
     def test_loss_with_scenario_plan_passes(self) -> None:
         f = _facts(60.0, "50")

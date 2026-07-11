@@ -165,6 +165,79 @@ MA20_SLOPE_FALLING_PHRASES = (
     "月線走跌",
     "月線趨勢向下",
 )
+RSI_OVERBOUGHT_PHRASES = (
+    "RSI超買",
+    "RSI偏高",
+    "RSI過熱",
+    "動能過熱",
+    "超買區",
+)
+RSI_OVERSOLD_PHRASES = (
+    "RSI超賣",
+    "RSI偏低",
+    "動能偏弱",
+    "超賣區",
+)
+VOLATILITY_HIGH_PHRASES = (
+    "波動偏高",
+    "波動擴大",
+    "波動劇烈",
+    "波動加大",
+    "ATR偏高",
+    "ATR擴大",
+    "震盪加劇",
+)
+VOLATILITY_LOW_PHRASES = (
+    "波動偏低",
+    "波動收斂",
+    "波動萎縮",
+    "ATR偏低",
+    "波動溫和",
+)
+TREND_STRONG_PHRASES = (
+    "趨勢明確",
+    "趨勢強",
+    "強勢趨勢",
+    "ADX偏高",
+    "ADX較高",
+    "趨勢夠強",
+    "趨勢方向明確",
+)
+TREND_WEAK_PHRASES = (
+    "趨勢不明",
+    "趨勢弱",
+    "缺乏趨勢",
+    "ADX偏低",
+    "ADX較低",
+    "震盪盤整",
+    "區間震盪",
+    "均線糾結",
+)
+MARGIN_RATIO_HIGH_PHRASES = (
+    "券資比偏高",
+    "券資比高",
+    "融券壓力大",
+    "融券相對偏高",
+)
+MARGIN_RATIO_LOW_PHRASES = (
+    "券資比偏低",
+    "券資比低",
+    "融券壓力小",
+    "融券相對偏低",
+)
+MARGIN_MOMENTUM_HEATING_PHRASES = (
+    "融資動能偏強",
+    "融資動能升溫",
+    "融資餘額增加",
+    "散戶加槓桿",
+    "融資升溫",
+)
+MARGIN_MOMENTUM_COOLING_PHRASES = (
+    "融資動能偏弱",
+    "融資動能降溫",
+    "融資餘額減少",
+    "融資降溫",
+)
 # short_rebound：站上 MA5 但仍在 MA20 下，不可寫成同步偏多或中期已轉強
 MA_ALIGN_REBOUND_DENY_PHRASES = MA_ALIGN_BULLISH_PHRASES + (
     "中期轉強",
@@ -197,6 +270,64 @@ VOLUME_SHRINK_PHRASES = (
     "量能不足",
     "成交量萎縮",
     "量能明顯萎縮",
+)
+VOLUME_TREND_HEATING_PHRASES = (
+    "量能升溫",
+    "量增趨勢",
+    "量能偏強",
+)
+VOLUME_TREND_COOLING_PHRASES = (
+    "量能降溫",
+    "量縮趨勢",
+    "量能偏弱",
+)
+VOLUME_BEARISH_DIVERGENCE_PHRASES = (
+    "價漲量縮",
+    "價量背離",
+    "量價背離",
+    "上漲量縮",
+)
+VOLUME_BULLISH_DIVERGENCE_PHRASES = (
+    "價跌量增",
+    "下跌量增",
+    "跌時量增",
+)
+VOLUME_CONFIRMING_UP_PHRASES = (
+    "價量配合",
+    "價漲量增",
+    "量價配合偏多",
+)
+VOLUME_CONFIRMING_DOWN_PHRASES = (
+    "價跌量縮",
+    "量價配合偏空",
+)
+MA5_MA10_GOLDEN_PHRASES = (
+    "MA5黃金交叉",
+    "MA5上穿MA10",
+    "MA5金叉",
+    "5日線上穿10日線",
+    "MA5/MA10黃金交叉",
+)
+MA5_MA10_DEATH_PHRASES = (
+    "MA5死亡交叉",
+    "MA5下穿MA10",
+    "MA5死叉",
+    "5日線下穿10日線",
+    "MA5/MA10死亡交叉",
+)
+MA10_MA20_GOLDEN_PHRASES = (
+    "MA10黃金交叉",
+    "MA10上穿MA20",
+    "MA10金叉",
+    "10日線上穿月線",
+    "MA10/MA20黃金交叉",
+)
+MA10_MA20_DEATH_PHRASES = (
+    "MA10死亡交叉",
+    "MA10下穿MA20",
+    "MA10死叉",
+    "10日線下穿月線",
+    "MA10/MA20死亡交叉",
 )
 PRICE_PERIOD_UP_PHRASES = (
     "區間上漲",
@@ -372,6 +503,16 @@ def _count_fact_citations(text: str, facts) -> tuple[int, int]:
         concepts.append("籌碼" in text or "法人" in text)
     if getattr(facts, "volume_anomaly", "unknown") in {"spike", "shrink"}:
         concepts.append("成交量" in text or "量能" in text)
+    if getattr(facts, "rsi_zone", "unknown") in {"overbought", "oversold"}:
+        concepts.append("RSI" in text or "動能" in text)
+    if getattr(facts, "volatility_regime", "unknown") in {"high", "low"}:
+        concepts.append("波動" in text or "ATR" in text)
+    if getattr(facts, "trend_strength", "unknown") in {"strong", "weak"}:
+        concepts.append("ADX" in text or "趨勢" in text)
+    if getattr(facts, "margin_short_ratio_zone", "unknown") in {"high", "low"}:
+        concepts.append("券資比" in text or "融券" in text)
+    if getattr(facts, "margin_momentum", "unknown") in {"heating", "cooling"}:
+        concepts.append("融資" in text or "槓桿" in text)
 
     total = len(concepts)
     cited = sum(1 for hit in concepts if hit)
@@ -602,6 +743,168 @@ def run_fact_checks(
                 )
             )
 
+    rsi_zone = getattr(facts, "rsi_zone", "unknown")
+    if rsi_zone in {"overbought", "oversold"}:
+        stripped = _strip_tables(text)
+        overbought = _contains_any(stripped, RSI_OVERBOUGHT_PHRASES)
+        oversold = _contains_any(stripped, RSI_OVERSOLD_PHRASES)
+        if rsi_zone == "overbought" and oversold and not overbought:
+            issues.append(
+                (
+                    "fact_rsi_zone_mismatch",
+                    f"facts 判定 RSI 偏高（動能過熱），"
+                    f"正文卻描述「{oversold}」，與 RSI 動能矛盾",
+                )
+            )
+        elif rsi_zone == "oversold" and overbought and not oversold:
+            issues.append(
+                (
+                    "fact_rsi_zone_mismatch",
+                    f"facts 判定 RSI 偏低（動能偏弱），"
+                    f"正文卻描述「{overbought}」，與 RSI 動能矛盾",
+                )
+            )
+
+    volatility_regime = getattr(facts, "volatility_regime", "unknown")
+    if volatility_regime in {"high", "low"}:
+        stripped = _strip_tables(text)
+        high_vol = _contains_any(stripped, VOLATILITY_HIGH_PHRASES)
+        low_vol = _contains_any(stripped, VOLATILITY_LOW_PHRASES)
+        if volatility_regime == "high" and low_vol and not high_vol:
+            issues.append(
+                (
+                    "fact_volatility_regime_mismatch",
+                    f"facts 判定波動偏高（ATR 擴大），"
+                    f"正文卻描述「{low_vol}」，與波動狀態矛盾",
+                )
+            )
+        elif volatility_regime == "low" and high_vol and not low_vol:
+            issues.append(
+                (
+                    "fact_volatility_regime_mismatch",
+                    f"facts 判定波動偏低，"
+                    f"正文卻描述「{high_vol}」，與波動狀態矛盾",
+                )
+            )
+
+    trend_strength = getattr(facts, "trend_strength", "unknown")
+    if trend_strength in {"strong", "weak"}:
+        stripped = _strip_tables(text)
+        strong = _contains_any(stripped, TREND_STRONG_PHRASES)
+        weak = _contains_any(stripped, TREND_WEAK_PHRASES)
+        if trend_strength == "strong" and weak and not strong:
+            issues.append(
+                (
+                    "fact_trend_strength_mismatch",
+                    f"facts 判定趨勢明確（ADX 偏高），"
+                    f"正文卻描述「{weak}」，與 ADX 趨勢強度矛盾",
+                )
+            )
+        elif trend_strength == "weak" and strong and not weak:
+            issues.append(
+                (
+                    "fact_trend_strength_mismatch",
+                    f"facts 判定趨勢偏弱（ADX 偏低），"
+                    f"正文卻描述「{strong}」，與 ADX 趨勢強度矛盾",
+                )
+            )
+
+    margin_short_ratio_zone = getattr(facts, "margin_short_ratio_zone", "unknown")
+    if margin_short_ratio_zone in {"high", "low"}:
+        stripped = _strip_tables(text)
+        high_ratio = _contains_any(stripped, MARGIN_RATIO_HIGH_PHRASES)
+        low_ratio = _contains_any(stripped, MARGIN_RATIO_LOW_PHRASES)
+        if margin_short_ratio_zone == "high" and low_ratio and not high_ratio:
+            issues.append(
+                (
+                    "fact_margin_short_ratio_mismatch",
+                    f"facts 判定券資比偏高，"
+                    f"正文卻描述「{low_ratio}」，與券資比矛盾",
+                )
+            )
+        elif margin_short_ratio_zone == "low" and high_ratio and not low_ratio:
+            issues.append(
+                (
+                    "fact_margin_short_ratio_mismatch",
+                    f"facts 判定券資比偏低，"
+                    f"正文卻描述「{high_ratio}」，與券資比矛盾",
+                )
+            )
+
+    margin_momentum = getattr(facts, "margin_momentum", "unknown")
+    if margin_momentum in {"heating", "cooling"}:
+        stripped = _strip_tables(text)
+        heating = _contains_any(stripped, MARGIN_MOMENTUM_HEATING_PHRASES)
+        cooling = _contains_any(stripped, MARGIN_MOMENTUM_COOLING_PHRASES)
+        if margin_momentum == "heating" and cooling and not heating:
+            issues.append(
+                (
+                    "fact_margin_momentum_mismatch",
+                    f"facts 判定融資動能偏強（區間融資餘額增加），"
+                    f"正文卻描述「{cooling}」，與融資動能矛盾",
+                )
+            )
+        elif margin_momentum == "cooling" and heating and not cooling:
+            issues.append(
+                (
+                    "fact_margin_momentum_mismatch",
+                    f"facts 判定融資動能偏弱（區間融資餘額減少），"
+                    f"正文卻描述「{heating}」，與融資動能矛盾",
+                )
+            )
+
+    ma5_cross = getattr(facts, "ma5_cross_ma10", "unknown")
+    ma5_cross_recency = getattr(facts, "ma5_cross_recency", "unknown")
+    if ma5_cross in {"golden", "death"} and ma5_cross_recency in {
+        "today",
+        "within_3d",
+    }:
+        stripped = _strip_tables(text)
+        golden = _contains_any(stripped, MA5_MA10_GOLDEN_PHRASES)
+        death = _contains_any(stripped, MA5_MA10_DEATH_PHRASES)
+        if ma5_cross == "golden" and death and not golden:
+            issues.append(
+                (
+                    "fact_ma5_ma10_cross_mismatch",
+                    f"facts 判定 MA5 黃金交叉 MA10（{ma5_cross_recency}），"
+                    f"正文卻描述「{death}」，與均線交叉矛盾",
+                )
+            )
+        elif ma5_cross == "death" and golden and not death:
+            issues.append(
+                (
+                    "fact_ma5_ma10_cross_mismatch",
+                    f"facts 判定 MA5 死亡交叉 MA10（{ma5_cross_recency}），"
+                    f"正文卻描述「{golden}」，與均線交叉矛盾",
+                )
+            )
+
+    ma10_cross = getattr(facts, "ma10_cross_ma20", "unknown")
+    ma10_cross_recency = getattr(facts, "ma10_cross_recency", "unknown")
+    if ma10_cross in {"golden", "death"} and ma10_cross_recency in {
+        "today",
+        "within_3d",
+    }:
+        stripped = _strip_tables(text)
+        golden = _contains_any(stripped, MA10_MA20_GOLDEN_PHRASES)
+        death = _contains_any(stripped, MA10_MA20_DEATH_PHRASES)
+        if ma10_cross == "golden" and death and not golden:
+            issues.append(
+                (
+                    "fact_ma10_ma20_cross_mismatch",
+                    f"facts 判定 MA10 黃金交叉 MA20（{ma10_cross_recency}），"
+                    f"正文卻描述「{death}」，與均線交叉矛盾",
+                )
+            )
+        elif ma10_cross == "death" and golden and not death:
+            issues.append(
+                (
+                    "fact_ma10_ma20_cross_mismatch",
+                    f"facts 判定 MA10 死亡交叉 MA20（{ma10_cross_recency}），"
+                    f"正文卻描述「{golden}」，與均線交叉矛盾",
+                )
+            )
+
     volume_anomaly = getattr(facts, "volume_anomaly", "unknown")
     if volume_anomaly in {"spike", "shrink"}:
         stripped = _strip_tables(text)
@@ -625,6 +928,77 @@ def run_fact_checks(
                         f"facts 判定成交量明顯萎縮，正文卻描述「{spike}」，與量能 facts 矛盾",
                     )
                 )
+
+    volume_trend = getattr(facts, "volume_trend", "unknown")
+    if volume_trend in {"heating", "cooling"}:
+        stripped = _strip_tables(text)
+        heating = _contains_any(stripped, VOLUME_TREND_HEATING_PHRASES)
+        cooling = _contains_any(stripped, VOLUME_TREND_COOLING_PHRASES)
+        if volume_trend == "heating" and cooling and not heating:
+            issues.append(
+                (
+                    "fact_volume_trend_mismatch",
+                    f"facts 判定量能升溫（5日均量高於20日均量），"
+                    f"正文卻描述「{cooling}」，與量能趨勢矛盾",
+                )
+            )
+        elif volume_trend == "cooling" and heating and not cooling:
+            issues.append(
+                (
+                    "fact_volume_trend_mismatch",
+                    f"facts 判定量能降溫（5日均量低於20日均量），"
+                    f"正文卻描述「{heating}」，與量能趨勢矛盾",
+                )
+            )
+
+    volume_price_div = getattr(facts, "volume_price_divergence", "unknown")
+    if volume_price_div in {
+        "bearish_divergence",
+        "bullish_divergence",
+        "confirming_up",
+        "confirming_down",
+    }:
+        stripped = _strip_tables(text)
+        bearish = _contains_any(stripped, VOLUME_BEARISH_DIVERGENCE_PHRASES)
+        bullish = _contains_any(stripped, VOLUME_BULLISH_DIVERGENCE_PHRASES)
+        confirming_up = _contains_any(stripped, VOLUME_CONFIRMING_UP_PHRASES)
+        confirming_down = _contains_any(stripped, VOLUME_CONFIRMING_DOWN_PHRASES)
+        if volume_price_div == "bearish_divergence" and (
+            confirming_up or bullish
+        ) and not bearish:
+            issues.append(
+                (
+                    "fact_volume_price_divergence_mismatch",
+                    f"facts 判定價漲量縮（量價背離），"
+                    f"正文卻描述「{confirming_up or bullish}」，與價量關係矛盾",
+                )
+            )
+        elif volume_price_div == "bullish_divergence" and (
+            confirming_down or bearish
+        ) and not bullish:
+            issues.append(
+                (
+                    "fact_volume_price_divergence_mismatch",
+                    f"facts 判定價跌量增，"
+                    f"正文卻描述「{confirming_down or bearish}」，與價量關係矛盾",
+                )
+            )
+        elif volume_price_div == "confirming_up" and bearish and not confirming_up:
+            issues.append(
+                (
+                    "fact_volume_price_divergence_mismatch",
+                    f"facts 判定價量配合偏多，"
+                    f"正文卻描述「{bearish}」，與價量關係矛盾",
+                )
+            )
+        elif volume_price_div == "confirming_down" and bullish and not confirming_down:
+            issues.append(
+                (
+                    "fact_volume_price_divergence_mismatch",
+                    f"facts 判定價量配合偏空，"
+                    f"正文卻描述「{bullish}」，與價量關係矛盾",
+                )
+            )
 
     price_trend = getattr(facts, "price_trend", "unknown")
     if price_trend in {"up", "down"}:

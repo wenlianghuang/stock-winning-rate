@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 
 def _to_float(raw: object) -> float | None:
@@ -122,9 +123,159 @@ MA20_SLOPE_LABEL = {
     "unknown": "月線斜率資料不足",
 }
 
+RSI_ZONE_LABEL = {
+    "overbought": "RSI 偏高（動能過熱，留意回檔）",
+    "oversold": "RSI 偏低（動能偏弱，留意反彈）",
+    "neutral": "RSI 中性區",
+    "unknown": "RSI 資料不足",
+}
+
+VOLATILITY_REGIME_LABEL = {
+    "high": "波動偏高（ATR 擴大，停損宜保守）",
+    "normal": "波動正常",
+    "low": "波動偏低（區間參考較可靠）",
+    "unknown": "波動資料不足",
+}
+
+TREND_STRENGTH_LABEL = {
+    "strong": "趨勢明確（ADX 偏高，均線方向較可信）",
+    "weak": "趨勢偏弱（ADX 偏低，易震盪盤整）",
+    "neutral": "趨勢強度中性",
+    "unknown": "ADX 資料不足",
+}
+
+MARGIN_SHORT_RATIO_ZONE_LABEL = {
+    "high": "券資比偏高（融券相對融資壓力較大）",
+    "low": "券資比偏低（融券壓力較小）",
+    "neutral": "券資比中性",
+    "unknown": "券資比資料不足",
+}
+
+MARGIN_MOMENTUM_LABEL = {
+    "heating": "融資動能偏強（區間融資餘額增加，散戶槓桿升溫）",
+    "cooling": "融資動能偏弱（區間融資餘額減少）",
+    "stable": "融資動能平穩",
+    "unknown": "融資動能資料不足",
+}
+
+MA_CROSS_LABEL = {
+    "golden": "黃金交叉",
+    "death": "死亡交叉",
+    "none": "近3日無均線交叉",
+    "unknown": "均線交叉資料不足",
+}
+
+MA_CROSS_PAIR_LABEL = {
+    ("golden", "ma5_ma10"): "MA5 黃金交叉 MA10（短線均線上穿）",
+    ("death", "ma5_ma10"): "MA5 死亡交叉 MA10（短線均線下穿）",
+    ("golden", "ma10_ma20"): "MA10 黃金交叉 MA20（短中線均線上穿）",
+    ("death", "ma10_ma20"): "MA10 死亡交叉 MA20（短中線均線下穿）",
+}
+
+MA_CROSS_RECENCY_LABEL = {
+    "today": "當日",
+    "within_3d": "近3日內",
+    "none": "無",
+    "unknown": "資料不足",
+}
+
+MA_CROSS_CSV_LABEL = {
+    "黃金交叉": "golden",
+    "死亡交叉": "death",
+    "無": "none",
+}
+
 MA20_SLOPE_THRESHOLD_PCT = 0.5
+MA5_PERIOD = 5
+MA10_PERIOD = 10
 MA20_PERIOD = 20
 MA20_SLOPE_LAG = 5
+MA_CROSS_LOOKBACK_DAYS = 3
+RSI_PERIOD = 14
+RSI_OVERBOUGHT = 70.0
+RSI_OVERSOLD = 30.0
+ATR_PERIOD = 14
+ATR_VOLATILITY_LOOKBACK = 20
+ATR_VOLATILITY_HIGH_RATIO = 1.25
+ATR_VOLATILITY_LOW_RATIO = 0.75
+ATR_VOLATILITY_HIGH_PCT = 3.5
+ATR_VOLATILITY_LOW_PCT = 1.5
+ADX_PERIOD = 14
+ADX_STRONG_THRESHOLD = 25.0
+ADX_WEAK_THRESHOLD = 20.0
+MARGIN_SHORT_RATIO_HIGH_PCT = 25.0
+MARGIN_SHORT_RATIO_LOW_PCT = 8.0
+MARGIN_MOMENTUM_HEATING_PCT = 3.0
+MARGIN_MOMENTUM_COOLING_PCT = -3.0
+RANGE_PERIOD = 20
+RANGE_NEAR_BAND_PCT = 2.0
+
+# 自適應校準（由 tools/calibrate_thresholds.py 產出，缺檔則 fallback 到上方常數）。
+MIN_CALIBRATION_SAMPLE = 30
+
+
+def _calibration_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "reports" / "calibration"
+
+
+_STOCK_THRESHOLD_CACHE: dict[str, dict | None] = {}
+
+
+def _load_stock_thresholds(stock_id: str) -> dict | None:
+    """Per-stock percentile thresholds; None when absent or under-sampled."""
+    if not stock_id:
+        return None
+    if stock_id in _STOCK_THRESHOLD_CACHE:
+        return _STOCK_THRESHOLD_CACHE[stock_id]
+    path = _calibration_dir() / f"{stock_id}.thresholds.json"
+    data: dict | None = None
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = None
+        if isinstance(loaded, dict) and int(loaded.get("n_rsi", 0)) >= MIN_CALIBRATION_SAMPLE:
+            data = loaded
+    _STOCK_THRESHOLD_CACHE[stock_id] = data
+    return data
+
+
+def _threshold_value(thresholds: dict | None, key: str, default: float) -> float:
+    if not thresholds:
+        return default
+    value = thresholds.get(key)
+    return float(value) if isinstance(value, (int, float)) else default
+
+
+def load_base_rates() -> dict | None:
+    """Regime base rates from calibration; None when the file is absent."""
+    path = _calibration_dir() / "base_rates.json"
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+RANGE_POSITION_LABEL = {
+    "near_high": "接近近20日高點（壓力區）",
+    "near_low": "接近近20日低點（支撐區）",
+    "mid": "處於近20日區間中段",
+    "unknown": "區間高低資料不足",
+}
+
+BREAKOUT_LABEL = {
+    "yes": "收盤突破近20日高（創區間新高）",
+    "no": "未突破近20日高",
+    "unknown": "突破判定資料不足",
+}
+
+BREAKDOWN_LABEL = {
+    "yes": "收盤跌破近20日低（創區間新低）",
+    "no": "未跌破近20日低",
+    "unknown": "跌破判定資料不足",
+}
 
 INTENSITY_LABEL = {
     "high": "偏高",
@@ -207,6 +358,118 @@ def _ma_stack(ma5: float | None, ma10: float | None, ma20: float | None) -> str:
     return "mixed"
 
 
+def _ma_series(closes: list[float], period: int) -> list[float | None]:
+    series: list[float | None] = []
+    for end in range(1, len(closes) + 1):
+        window = closes[:end]
+        if len(window) < period:
+            series.append(None)
+        else:
+            series.append(sum(window[-period:]) / period)
+    return series
+
+
+def _cross_event_at_index(
+    short_series: list[float | None],
+    long_series: list[float | None],
+    index: int,
+) -> str:
+    if index < 1:
+        return "none"
+    short_prev, long_prev = short_series[index - 1], long_series[index - 1]
+    short_now, long_now = short_series[index], long_series[index]
+    if None in (short_prev, long_prev, short_now, long_now):
+        return "none"
+    if short_prev <= long_prev and short_now > long_now:
+        return "golden"
+    if short_prev >= long_prev and short_now < long_now:
+        return "death"
+    return "none"
+
+
+def _recent_ma_cross(
+    closes: list[float],
+    short_period: int,
+    long_period: int,
+    *,
+    lookback_days: int = MA_CROSS_LOOKBACK_DAYS,
+) -> dict[str, object]:
+    unknown: dict[str, object] = {
+        "cross": "unknown",
+        "recency": "unknown",
+        "days_ago": None,
+    }
+    min_len = max(short_period, long_period) + 1
+    if len(closes) < min_len:
+        return unknown
+
+    short_series = _ma_series(closes, short_period)
+    long_series = _ma_series(closes, long_period)
+    last_index = len(closes) - 1
+    start_index = max(1, last_index - lookback_days)
+
+    for index in range(last_index, start_index - 1, -1):
+        event = _cross_event_at_index(short_series, long_series, index)
+        if event == "none":
+            continue
+        days_ago = last_index - index
+        recency = "today" if days_ago == 0 else "within_3d"
+        return {
+            "cross": event,
+            "recency": recency,
+            "days_ago": days_ago,
+        }
+
+    return {"cross": "none", "recency": "none", "days_ago": None}
+
+
+def _parse_ma_cross_csv(raw: object) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    return MA_CROSS_CSV_LABEL.get(text, "")
+
+
+def _ma_cross_from_row(
+    row: dict,
+    closes: list[float],
+    *,
+    csv_key: str,
+    short_period: int,
+    long_period: int,
+) -> dict[str, object]:
+    parsed = _parse_ma_cross_csv(row.get(csv_key))
+    if parsed == "golden":
+        return {"cross": "golden", "recency": "today", "days_ago": 0}
+    if parsed == "death":
+        return {"cross": "death", "recency": "today", "days_ago": 0}
+    return _recent_ma_cross(closes, short_period, long_period)
+
+
+def _ma_crosses_from_row(row: dict, history: list[dict]) -> dict[str, object]:
+    closes = _closes_from_row_and_history(row, history)
+    ma5_ma10 = _ma_cross_from_row(
+        row,
+        closes,
+        csv_key="MA5交叉MA10",
+        short_period=MA5_PERIOD,
+        long_period=MA10_PERIOD,
+    )
+    ma10_ma20 = _ma_cross_from_row(
+        row,
+        closes,
+        csv_key="MA10交叉MA20",
+        short_period=MA10_PERIOD,
+        long_period=MA20_PERIOD,
+    )
+    return {
+        "ma5_cross_ma10": ma5_ma10["cross"],
+        "ma5_cross_recency": ma5_ma10["recency"],
+        "ma10_cross_ma20": ma10_ma20["cross"],
+        "ma10_cross_recency": ma10_ma20["recency"],
+    }
+
+
 def _ma20_slope_pct_from_closes(closes: list[float]) -> float | None:
     if len(closes) < MA20_PERIOD + MA20_SLOPE_LAG:
         return None
@@ -227,6 +490,280 @@ def _ma20_slope_label(slope_pct: float | None) -> str:
     return "flat"
 
 
+def _rsi_wilder(closes: list[float], period: int = RSI_PERIOD) -> float | None:
+    if len(closes) < period + 1:
+        return None
+    avg_gain = 0.0
+    avg_loss = 0.0
+    for index in range(1, period + 1):
+        delta = closes[index] - closes[index - 1]
+        if delta > 0:
+            avg_gain += delta
+        else:
+            avg_loss -= delta
+    avg_gain /= period
+    avg_loss /= period
+
+    for index in range(period + 1, len(closes)):
+        delta = closes[index] - closes[index - 1]
+        gain = max(delta, 0.0)
+        loss = max(-delta, 0.0)
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return round(100.0 - 100.0 / (1.0 + rs), 2)
+
+
+def _rsi_zone(
+    rsi: float | None,
+    *,
+    overbought: float = RSI_OVERBOUGHT,
+    oversold: float = RSI_OVERSOLD,
+) -> str:
+    if rsi is None:
+        return "unknown"
+    if rsi >= overbought:
+        return "overbought"
+    if rsi <= oversold:
+        return "oversold"
+    return "neutral"
+
+
+def _true_ranges(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+) -> list[float]:
+    if not highs or not lows or not closes:
+        return []
+    length = min(len(highs), len(lows), len(closes))
+    trs: list[float] = []
+    for index in range(length):
+        if index == 0:
+            trs.append(highs[index] - lows[index])
+            continue
+        tr = max(
+            highs[index] - lows[index],
+            abs(highs[index] - closes[index - 1]),
+            abs(lows[index] - closes[index - 1]),
+        )
+        trs.append(tr)
+    return trs
+
+
+def _atr_wilder(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = ATR_PERIOD,
+) -> float | None:
+    trs = _true_ranges(highs, lows, closes)
+    if len(trs) < period:
+        return None
+    atr = sum(trs[:period]) / period
+    for index in range(period, len(trs)):
+        atr = (atr * (period - 1) + trs[index]) / period
+    return round(atr, 4)
+
+
+def _atr_pct(atr: float | None, close: float | None) -> float | None:
+    if atr is None or close is None or close <= 0:
+        return None
+    return round(atr / close * 100, 2)
+
+
+def _atr_pct_series(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    *,
+    period: int = ATR_PERIOD,
+) -> list[float]:
+    trs = _true_ranges(highs, lows, closes)
+    if len(trs) < period:
+        return []
+    atr = sum(trs[:period]) / period
+    atr_pcts: list[float] = []
+    close_index = period - 1
+    if closes[close_index] > 0:
+        atr_pcts.append(round(atr / closes[close_index] * 100, 2))
+    for index in range(period, len(trs)):
+        atr = (atr * (period - 1) + trs[index]) / period
+        close_index = index
+        if closes[close_index] > 0:
+            atr_pcts.append(round(atr / closes[close_index] * 100, 2))
+    return atr_pcts
+
+
+def _volatility_regime_fixed(
+    atr_pct: float,
+    *,
+    high_pct: float = ATR_VOLATILITY_HIGH_PCT,
+    low_pct: float = ATR_VOLATILITY_LOW_PCT,
+) -> str:
+    if atr_pct >= high_pct:
+        return "high"
+    if atr_pct <= low_pct:
+        return "low"
+    return "normal"
+
+
+def _volatility_regime(
+    atr_pct: float | None,
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    *,
+    high_pct: float = ATR_VOLATILITY_HIGH_PCT,
+    low_pct: float = ATR_VOLATILITY_LOW_PCT,
+) -> str:
+    if atr_pct is None:
+        return "unknown"
+    atr_pcts = _atr_pct_series(highs, lows, closes)
+    if len(atr_pcts) < 5:
+        return _volatility_regime_fixed(atr_pct, high_pct=high_pct, low_pct=low_pct)
+    recent = atr_pcts[-ATR_VOLATILITY_LOOKBACK:]
+    avg_pct = sum(recent) / len(recent)
+    if avg_pct <= 0:
+        return "normal"
+    ratio = atr_pct / avg_pct
+    if ratio >= ATR_VOLATILITY_HIGH_RATIO:
+        return "high"
+    if ratio <= ATR_VOLATILITY_LOW_RATIO:
+        return "low"
+    return "normal"
+
+
+def _adx_wilder(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = ADX_PERIOD,
+) -> float | None:
+    length = min(len(highs), len(lows), len(closes))
+    if length < period * 2:
+        return None
+
+    plus_dm = [0.0]
+    minus_dm = [0.0]
+    tr = [0.0]
+    for index in range(1, length):
+        up = highs[index] - highs[index - 1]
+        down = lows[index - 1] - lows[index]
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        tr.append(
+            max(
+                highs[index] - lows[index],
+                abs(highs[index] - closes[index - 1]),
+                abs(lows[index] - closes[index - 1]),
+            )
+        )
+
+    atr = sum(tr[1 : period + 1])
+    smooth_plus = sum(plus_dm[1 : period + 1])
+    smooth_minus = sum(minus_dm[1 : period + 1])
+
+    dx_values: list[float] = []
+    adx_values: list[float] = []
+
+    for index in range(period, length):
+        if index > period:
+            atr = atr - atr / period + tr[index]
+            smooth_plus = smooth_plus - smooth_plus / period + plus_dm[index]
+            smooth_minus = smooth_minus - smooth_minus / period + minus_dm[index]
+
+        if atr == 0:
+            dx = 0.0
+        else:
+            plus_di = 100.0 * smooth_plus / atr
+            minus_di = 100.0 * smooth_minus / atr
+            denom = plus_di + minus_di
+            dx = 100.0 * abs(plus_di - minus_di) / denom if denom > 0 else 0.0
+        dx_values.append(dx)
+
+        if len(dx_values) >= period:
+            if not adx_values:
+                adx_values.append(sum(dx_values[:period]) / period)
+            else:
+                adx_values.append(
+                    (adx_values[-1] * (period - 1) + dx) / period
+                )
+
+    if not adx_values:
+        return None
+    return round(adx_values[-1], 2)
+
+
+def _trend_strength(adx: float | None) -> str:
+    if adx is None:
+        return "unknown"
+    if adx >= ADX_STRONG_THRESHOLD:
+        return "strong"
+    if adx <= ADX_WEAK_THRESHOLD:
+        return "weak"
+    return "neutral"
+
+
+def _margin_short_ratio_pct(
+    margin_lots: int | None,
+    short_lots: int | None,
+) -> float | None:
+    if margin_lots is None or short_lots is None or margin_lots <= 0:
+        return None
+    return round(short_lots / margin_lots * 100, 2)
+
+
+def _margin_momentum_pct(
+    first_margin: int | None,
+    last_margin: int | None,
+) -> float | None:
+    if first_margin is None or last_margin is None or first_margin <= 0:
+        return None
+    return round((last_margin - first_margin) / first_margin * 100, 2)
+
+
+def _margin_short_ratio_zone(ratio_pct: float | None) -> str:
+    if ratio_pct is None:
+        return "unknown"
+    if ratio_pct >= MARGIN_SHORT_RATIO_HIGH_PCT:
+        return "high"
+    if ratio_pct <= MARGIN_SHORT_RATIO_LOW_PCT:
+        return "low"
+    return "neutral"
+
+
+def _margin_momentum_label(momentum_pct: float | None) -> str:
+    if momentum_pct is None:
+        return "unknown"
+    if momentum_pct >= MARGIN_MOMENTUM_HEATING_PCT:
+        return "heating"
+    if momentum_pct <= MARGIN_MOMENTUM_COOLING_PCT:
+        return "cooling"
+    return "stable"
+
+
+def _margin_balances_from_row_and_history(
+    row: dict,
+    history: list[dict],
+) -> tuple[int | None, int | None]:
+    margins: list[int] = []
+    for hist_row in history:
+        value = _to_int(hist_row.get("融資今日餘額_張"))
+        if value is not None:
+            margins.append(value)
+    margin_today = _to_int(row.get("融資今日餘額_張"))
+    if margin_today is not None:
+        if not margins or margins[-1] != margin_today:
+            margins.append(margin_today)
+    if len(margins) < 2:
+        return (margins[0] if margins else None), (margins[-1] if margins else None)
+    return margins[0], margins[-1]
+
+
 def _closes_from_row_and_history(row: dict, history: list[dict]) -> list[float]:
     closes: list[float] = []
     for hist_row in history:
@@ -238,6 +775,128 @@ def _closes_from_row_and_history(row: dict, history: list[dict]) -> list[float]:
         if not closes or closes[-1] != close_today:
             closes.append(close_today)
     return closes
+
+
+def _ohlc_from_row_and_history(
+    row: dict,
+    history: list[dict],
+) -> tuple[list[float], list[float], list[float]]:
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    for hist_row in history:
+        high = _to_float(hist_row.get("最高價"))
+        low = _to_float(hist_row.get("最低價"))
+        close = _to_float(hist_row.get("收盤價"))
+        if high is not None:
+            highs.append(high)
+        if low is not None:
+            lows.append(low)
+        if close is not None:
+            closes.append(close)
+
+    high_today = _to_float(row.get("最高價"))
+    low_today = _to_float(row.get("最低價"))
+    close_today = _to_float(row.get("收盤價"))
+    if close_today is not None and (not closes or closes[-1] != close_today):
+        if high_today is not None:
+            highs.append(high_today)
+        if low_today is not None:
+            lows.append(low_today)
+        closes.append(close_today)
+    return highs, lows, closes
+
+
+def _compute_range_levels(
+    highs: list[float],
+    lows: list[float],
+    close: float | None,
+    *,
+    period: int = RANGE_PERIOD,
+    near_band_pct: float = RANGE_NEAR_BAND_PCT,
+) -> dict[str, object]:
+    unknown: dict[str, object] = {
+        "high_20d": None,
+        "low_20d": None,
+        "dist_to_20d_high_pct": None,
+        "dist_to_20d_low_pct": None,
+        "range_position": "unknown",
+        "breakout_20d_high": "unknown",
+        "breakdown_20d_low": "unknown",
+    }
+    if close is None or len(highs) < period or len(lows) < period:
+        return unknown
+
+    window_highs = highs[-period:]
+    window_lows = lows[-period:]
+    high_20d = max(window_highs)
+    low_20d = min(window_lows)
+    if high_20d <= 0 or low_20d <= 0:
+        return unknown
+
+    dist_high = (high_20d - close) / high_20d * 100
+    dist_low = (close - low_20d) / low_20d * 100
+    if dist_high <= near_band_pct:
+        range_position = "near_high"
+    elif dist_low <= near_band_pct:
+        range_position = "near_low"
+    else:
+        range_position = "mid"
+
+    prior_high = max(highs[-period:-1])
+    prior_low = min(lows[-period:-1])
+    return {
+        "high_20d": round(high_20d, 2),
+        "low_20d": round(low_20d, 2),
+        "dist_to_20d_high_pct": round(dist_high, 2),
+        "dist_to_20d_low_pct": round(dist_low, 2),
+        "range_position": range_position,
+        "breakout_20d_high": "yes" if close > prior_high else "no",
+        "breakdown_20d_low": "yes" if close < prior_low else "no",
+    }
+
+
+def _range_levels_from_row(row: dict, history: list[dict]) -> dict[str, object]:
+    close = _to_float(row.get("收盤價"))
+    high_20d = _to_float(row.get("區間20日高"))
+    low_20d = _to_float(row.get("區間20日低"))
+    if high_20d is not None and low_20d is not None and close is not None:
+        dist_high = _to_float(row.get("距20日高_%"))
+        dist_low = _to_float(row.get("距20日低_%"))
+        if dist_high is None and high_20d > 0:
+            dist_high = round((high_20d - close) / high_20d * 100, 2)
+        if dist_low is None and low_20d > 0:
+            dist_low = round((close - low_20d) / low_20d * 100, 2)
+
+        breakout_raw = str(row.get("突破20日高", "")).strip()
+        breakdown_raw = str(row.get("跌破20日低", "")).strip()
+        if dist_high is not None and dist_high <= RANGE_NEAR_BAND_PCT:
+            range_position = "near_high"
+        elif dist_low is not None and dist_low <= RANGE_NEAR_BAND_PCT:
+            range_position = "near_low"
+        else:
+            range_position = "mid"
+
+        breakout = {
+            "是": "yes",
+            "否": "no",
+        }.get(breakout_raw, "unknown")
+        breakdown = {
+            "是": "yes",
+            "否": "no",
+        }.get(breakdown_raw, "unknown")
+        return {
+            "high_20d": high_20d,
+            "low_20d": low_20d,
+            "dist_to_20d_high_pct": dist_high,
+            "dist_to_20d_low_pct": dist_low,
+            "range_position": range_position,
+            "breakout_20d_high": breakout,
+            "breakdown_20d_low": breakdown,
+        }
+
+    highs, lows, closes = _ohlc_from_row_and_history(row, history)
+    return _compute_range_levels(highs, lows, close)
 
 
 def _relative_strength(stock_pct: float | None, market_pct: float | None, *, band: float) -> str:
@@ -295,8 +954,30 @@ class ChipFacts:
     ma_short_alignment: str  # MA5 vs MA10
     ma_mid_alignment: str  # MA10 vs MA20
     ma_stack: str = "unknown"  # bullish_stack/bearish_stack/mixed/unknown
+    ma5_cross_ma10: str = "unknown"  # golden/death/none/unknown
+    ma5_cross_recency: str = "unknown"  # today/within_3d/none/unknown
+    ma10_cross_ma20: str = "unknown"
+    ma10_cross_recency: str = "unknown"
     ma20_slope: str = "unknown"  # rising/falling/flat/unknown
     ma20_slope_pct: float | None = None
+    rsi_14: float | None = None
+    rsi_zone: str = "unknown"  # overbought/oversold/neutral/unknown
+    atr_14: float | None = None
+    atr_pct: float | None = None
+    volatility_regime: str = "unknown"  # high/normal/low/unknown
+    adx_14: float | None = None
+    trend_strength: str = "unknown"  # strong/weak/neutral/unknown
+    margin_short_ratio_pct: float | None = None
+    margin_short_ratio_zone: str = "unknown"  # high/low/neutral/unknown
+    margin_momentum_pct: float | None = None
+    margin_momentum: str = "unknown"  # heating/cooling/stable/unknown
+    high_20d: float | None = None
+    low_20d: float | None = None
+    dist_to_20d_high_pct: float | None = None
+    dist_to_20d_low_pct: float | None = None
+    range_position: str = "unknown"  # near_high/near_low/mid/unknown
+    breakout_20d_high: str = "unknown"  # yes/no/unknown
+    breakdown_20d_low: str = "unknown"  # yes/no/unknown
     divergences: list[str] = field(default_factory=list)
 
     # 規則化判定（v2）
@@ -306,6 +987,11 @@ class ChipFacts:
     day_trade_intensity: str = "unknown"
     borrow_pressure: str = "unknown"
     volume_anomaly: str = "unknown"
+    volume_trend: str = "unknown"  # heating/cooling/stable/unknown
+    vol_ma5_lots: int | None = None
+    vol_ma20_lots: int | None = None
+    volume_ma_ratio: float | None = None
+    volume_price_divergence: str = "unknown"
     chip_regime: str = "unknown"
 
     # 大盤脈絡（v3：加權指數 TAIEX）
@@ -426,13 +1112,16 @@ BORROW_LABEL = {
 def _volume_anomaly(
     today_volume: int | None,
     avg_volume: int | None,
+    *,
+    spike_ratio: float = 1.5,
+    shrink_ratio: float = 0.65,
 ) -> str:
     if today_volume is None or avg_volume is None or avg_volume <= 0:
         return "unknown"
     ratio = today_volume / avg_volume
-    if ratio >= 1.5:
+    if ratio >= spike_ratio:
         return "spike"
-    if ratio <= 0.65:
+    if ratio <= shrink_ratio:
         return "shrink"
     return "normal"
 
@@ -444,6 +1133,112 @@ VOLUME_ANOMALY_LABEL = {
     "unknown": "成交量資料不足",
 }
 
+VOLUME_TREND_HEATING_RATIO = 1.2
+VOLUME_TREND_COOLING_RATIO = 0.8
+
+VOLUME_TREND_LABEL = {
+    "heating": "量能升溫（5日均量高於20日均量）",
+    "cooling": "量能降溫（5日均量低於20日均量）",
+    "stable": "量能平穩（5日/20日均量接近）",
+    "unknown": "量能趨勢資料不足",
+}
+
+VOLUME_PRICE_DIVERGENCE_LABEL = {
+    "confirming_up": "價量配合偏多（區間上漲且量能偏強）",
+    "confirming_down": "價量配合偏空（區間下跌且量能偏弱）",
+    "bearish_divergence": "價漲量縮（量價背離，追高需留意）",
+    "bullish_divergence": "價跌量增（可能洗盤或承接）",
+    "none": "價量未見明顯背離",
+    "unknown": "價量背離資料不足",
+}
+
+
+def _volume_moving_average(volumes: list[int], period: int) -> float | None:
+    if len(volumes) < period:
+        return None
+    return sum(volumes[-period:]) / period
+
+
+def _volumes_from_row_and_history(row: dict, history: list[dict]) -> list[int]:
+    volumes: list[int] = []
+    for hist_row in history:
+        volume = _to_int(hist_row.get("成交量_張"))
+        if volume is not None:
+            volumes.append(volume)
+    volume_today = _to_int(row.get("成交量_張"))
+    if volume_today is not None:
+        if not volumes or volumes[-1] != volume_today:
+            volumes.append(volume_today)
+    return volumes
+
+
+def _volume_trend_metrics(
+    vol_ma5: float | None,
+    vol_ma20: float | None,
+) -> tuple[str, float | None]:
+    if vol_ma5 is None or vol_ma20 is None or vol_ma20 <= 0:
+        return "unknown", None
+    ratio = vol_ma5 / vol_ma20
+    if ratio >= VOLUME_TREND_HEATING_RATIO:
+        return "heating", round(ratio, 2)
+    if ratio <= VOLUME_TREND_COOLING_RATIO:
+        return "cooling", round(ratio, 2)
+    return "stable", round(ratio, 2)
+
+
+def _volume_metrics_from_row(row: dict, history: list[dict]) -> dict[str, object]:
+    vol_ma5 = _to_float(row.get("量均線5_張"))
+    vol_ma20 = _to_float(row.get("量均線20_張"))
+    ratio = _to_float(row.get("量均線比"))
+
+    if vol_ma5 is None or vol_ma20 is None:
+        volumes = _volumes_from_row_and_history(row, history)
+        vol_ma5 = _volume_moving_average(volumes, MA5_PERIOD)
+        vol_ma20 = _volume_moving_average(volumes, MA20_PERIOD)
+
+    volume_trend, computed_ratio = _volume_trend_metrics(vol_ma5, vol_ma20)
+    if ratio is None:
+        ratio = computed_ratio
+
+    return {
+        "vol_ma5_lots": int(round(vol_ma5)) if vol_ma5 is not None else None,
+        "vol_ma20_lots": int(round(vol_ma20)) if vol_ma20 is not None else None,
+        "volume_ma_ratio": ratio,
+        "volume_trend": volume_trend,
+    }
+
+
+def _volume_price_divergence(
+    price_trend: str,
+    volume_trend: str,
+    volume_anomaly: str,
+) -> str:
+    if price_trend == "unknown":
+        return "unknown"
+
+    if volume_trend == "heating":
+        if price_trend == "up":
+            return "confirming_up"
+        if price_trend == "down":
+            return "bullish_divergence"
+    elif volume_trend == "cooling":
+        if price_trend == "up":
+            return "bearish_divergence"
+        if price_trend == "down":
+            return "confirming_down"
+
+    if volume_trend in {"stable", "unknown"}:
+        if price_trend == "up" and volume_anomaly == "shrink":
+            return "bearish_divergence"
+        if price_trend == "down" and volume_anomaly == "spike":
+            return "bullish_divergence"
+        if price_trend == "up" and volume_anomaly == "spike":
+            return "confirming_up"
+        if price_trend == "down" and volume_anomaly == "shrink":
+            return "confirming_down"
+
+    return "none"
+
 
 def _detect_chip_regime(
     *,
@@ -454,6 +1249,7 @@ def _detect_chip_regime(
     divergences: list[str],
     major_foreign_divergence: bool,
     margin_short_regime: str,
+    volume_price_divergence: str = "unknown",
 ) -> str:
     score = 0
     if foreign_cum is not None:
@@ -477,6 +1273,10 @@ def _detect_chip_regime(
         score -= 1
     if margin_short_regime in {"margin_up", "margin_up_short_up"} and price_trend == "down":
         score -= 1
+    if volume_price_divergence == "bearish_divergence":
+        score -= 1
+    elif volume_price_divergence == "confirming_up":
+        score += 1
 
     if score >= 2:
         return "accumulation"
@@ -493,6 +1293,8 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", "")).strip()
     trade_date = str(row.get("日期", "")).strip()
+
+    thresholds = _load_stock_thresholds(stock_id)
 
     foreign_net = _to_int(row.get("外資買賣超_張"))
     trust_net = _to_int(row.get("投信買賣超_張"))
@@ -557,6 +1359,58 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         )
     ma20_slope = _ma20_slope_label(ma20_slope_pct)
 
+    rsi_14 = _to_float(row.get("RSI14"))
+    if rsi_14 is None:
+        rsi_14 = _rsi_wilder(_closes_from_row_and_history(row, history))
+    rsi_zone = _rsi_zone(
+        rsi_14,
+        overbought=_threshold_value(thresholds, "rsi_overbought", RSI_OVERBOUGHT),
+        oversold=_threshold_value(thresholds, "rsi_oversold", RSI_OVERSOLD),
+    )
+
+    atr_14 = _to_float(row.get("ATR14"))
+    atr_pct = _to_float(row.get("ATR14_%"))
+    highs, lows, closes = _ohlc_from_row_and_history(row, history)
+    if atr_14 is None and highs and lows and closes:
+        atr_14 = _atr_wilder(highs, lows, closes)
+    close_price = _to_float(row.get("收盤價")) or (closes[-1] if closes else None)
+    if atr_pct is None:
+        atr_pct = _atr_pct(atr_14, close_price)
+    volatility_regime = _volatility_regime(
+        atr_pct,
+        highs,
+        lows,
+        closes,
+        high_pct=_threshold_value(thresholds, "atr_pct_high", ATR_VOLATILITY_HIGH_PCT),
+        low_pct=_threshold_value(thresholds, "atr_pct_low", ATR_VOLATILITY_LOW_PCT),
+    )
+
+    adx_14 = _to_float(row.get("ADX14"))
+    if adx_14 is None and highs and lows and closes:
+        adx_14 = _adx_wilder(highs, lows, closes)
+    trend_strength = _trend_strength(adx_14)
+
+    margin_short_ratio_pct = _to_float(row.get("券資比_%"))
+    margin_momentum_pct = _to_float(row.get("融資動能_%"))
+    margin_today = _to_int(row.get("融資今日餘額_張"))
+    short_today = _to_int(row.get("融券今日餘額_張"))
+    if margin_short_ratio_pct is None:
+        margin_short_ratio_pct = _margin_short_ratio_pct(margin_today, short_today)
+    if margin_momentum_pct is None:
+        first_margin, last_margin = _margin_balances_from_row_and_history(row, history)
+        if first_margin is None and margin_delta is not None and margin_today is not None:
+            first_margin = margin_today - margin_delta
+            last_margin = margin_today
+        elif first_margin is None and margin_today is not None:
+            first_margin = margin_today
+            last_margin = margin_today
+        margin_momentum_pct = _margin_momentum_pct(first_margin, last_margin)
+    margin_short_ratio_zone = _margin_short_ratio_zone(margin_short_ratio_pct)
+    margin_momentum = _margin_momentum_label(margin_momentum_pct)
+
+    range_levels = _range_levels_from_row(row, history)
+    ma_crosses = _ma_crosses_from_row(row, history)
+
     divergences = _detect_divergences(
         today_change=today_change,
         foreign_net=foreign_net,
@@ -605,7 +1459,19 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     margin_short = _margin_short_regime(margin_delta, short_delta)
     day_trade = _day_trade_intensity(day_trade_ratio, avg_day_trade_ratio)
     borrow = _borrow_pressure(history, borrow_sell_today)
-    volume_flag = _volume_anomaly(volume_today, avg_volume)
+    volume_flag = _volume_anomaly(
+        volume_today,
+        avg_volume,
+        spike_ratio=_threshold_value(thresholds, "volume_spike_ratio", 1.5),
+        shrink_ratio=_threshold_value(thresholds, "volume_shrink_ratio", 0.65),
+    )
+    volume_metrics = _volume_metrics_from_row(row, history)
+    volume_trend = volume_metrics["volume_trend"]  # type: ignore[assignment]
+    volume_price_div = _volume_price_divergence(
+        price_trend,
+        str(volume_trend),
+        volume_flag,
+    )
     chip_regime = _detect_chip_regime(
         foreign_direction=foreign_direction,
         foreign_cum=foreign_cum,
@@ -614,6 +1480,7 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         divergences=divergences,
         major_foreign_divergence=major_foreign_div,
         margin_short_regime=margin_short,
+        volume_price_divergence=volume_price_div,
     )
 
     facts = ChipFacts(
@@ -652,8 +1519,30 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         ma_short_alignment=ma_short_alignment,
         ma_mid_alignment=ma_mid_alignment,
         ma_stack=ma_stack,
+        ma5_cross_ma10=ma_crosses["ma5_cross_ma10"],  # type: ignore[arg-type]
+        ma5_cross_recency=ma_crosses["ma5_cross_recency"],  # type: ignore[arg-type]
+        ma10_cross_ma20=ma_crosses["ma10_cross_ma20"],  # type: ignore[arg-type]
+        ma10_cross_recency=ma_crosses["ma10_cross_recency"],  # type: ignore[arg-type]
         ma20_slope=ma20_slope,
         ma20_slope_pct=ma20_slope_pct,
+        rsi_14=rsi_14,
+        rsi_zone=rsi_zone,  # type: ignore[arg-type]
+        atr_14=atr_14,
+        atr_pct=atr_pct,
+        volatility_regime=volatility_regime,  # type: ignore[arg-type]
+        adx_14=adx_14,
+        trend_strength=trend_strength,  # type: ignore[arg-type]
+        margin_short_ratio_pct=margin_short_ratio_pct,
+        margin_short_ratio_zone=margin_short_ratio_zone,  # type: ignore[arg-type]
+        margin_momentum_pct=margin_momentum_pct,
+        margin_momentum=margin_momentum,  # type: ignore[arg-type]
+        high_20d=range_levels["high_20d"],  # type: ignore[arg-type]
+        low_20d=range_levels["low_20d"],  # type: ignore[arg-type]
+        dist_to_20d_high_pct=range_levels["dist_to_20d_high_pct"],  # type: ignore[arg-type]
+        dist_to_20d_low_pct=range_levels["dist_to_20d_low_pct"],  # type: ignore[arg-type]
+        range_position=range_levels["range_position"],  # type: ignore[arg-type]
+        breakout_20d_high=range_levels["breakout_20d_high"],  # type: ignore[arg-type]
+        breakdown_20d_low=range_levels["breakdown_20d_low"],  # type: ignore[arg-type]
         divergences=divergences,
         institutional_consensus=institutional,
         major_foreign_divergence=major_foreign_div,
@@ -661,6 +1550,11 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         day_trade_intensity=day_trade,
         borrow_pressure=borrow,
         volume_anomaly=volume_flag,
+        volume_trend=str(volume_trend),
+        vol_ma5_lots=volume_metrics["vol_ma5_lots"],  # type: ignore[arg-type]
+        vol_ma20_lots=volume_metrics["vol_ma20_lots"],  # type: ignore[arg-type]
+        volume_ma_ratio=volume_metrics["volume_ma_ratio"],  # type: ignore[arg-type]
+        volume_price_divergence=volume_price_div,
         chip_regime=chip_regime,
         market_close=market_close,
         market_change_pct=round(market_change, 2) if market_change is not None else None,
@@ -788,12 +1682,67 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
     elif facts.ma_stack == "mixed":
         anchors.append(MA_STACK_LABEL["mixed"])
 
+    if (
+        facts.ma5_cross_ma10 in {"golden", "death"}
+        and facts.ma5_cross_recency in {"today", "within_3d"}
+    ):
+        label = MA_CROSS_PAIR_LABEL[(facts.ma5_cross_ma10, "ma5_ma10")]
+        recency = MA_CROSS_RECENCY_LABEL[facts.ma5_cross_recency]
+        anchors.append(f"{label}（{recency}）")
+    if (
+        facts.ma10_cross_ma20 in {"golden", "death"}
+        and facts.ma10_cross_recency in {"today", "within_3d"}
+    ):
+        label = MA_CROSS_PAIR_LABEL[(facts.ma10_cross_ma20, "ma10_ma20")]
+        recency = MA_CROSS_RECENCY_LABEL[facts.ma10_cross_recency]
+        anchors.append(f"{label}（{recency}）")
+
     if facts.ma20_slope in {"rising", "falling"}:
         label = MA20_SLOPE_LABEL[facts.ma20_slope]
         if facts.ma20_slope_pct is not None:
             anchors.append(f"{label}（近 5 日 {facts.ma20_slope_pct:+.1f}%）")
         else:
             anchors.append(label)
+
+    if facts.rsi_zone != "unknown" and facts.rsi_14 is not None:
+        anchors.append(
+            f"{RSI_ZONE_LABEL[facts.rsi_zone]}（RSI14 {facts.rsi_14:.1f}）"
+        )
+
+    if facts.volatility_regime != "unknown" and facts.atr_pct is not None:
+        anchors.append(
+            f"{VOLATILITY_REGIME_LABEL[facts.volatility_regime]}"
+            f"（ATR14 約 {facts.atr_pct:.1f}%）"
+        )
+
+    if facts.trend_strength != "unknown" and facts.adx_14 is not None:
+        anchors.append(
+            f"{TREND_STRENGTH_LABEL[facts.trend_strength]}"
+            f"（ADX14 {facts.adx_14:.1f}）"
+        )
+
+    if facts.margin_short_ratio_zone != "unknown" and facts.margin_short_ratio_pct is not None:
+        anchors.append(
+            f"{MARGIN_SHORT_RATIO_ZONE_LABEL[facts.margin_short_ratio_zone]}"
+            f"（券資比 {facts.margin_short_ratio_pct:.1f}%）"
+        )
+
+    if facts.margin_momentum != "unknown" and facts.margin_momentum_pct is not None:
+        anchors.append(
+            f"{MARGIN_MOMENTUM_LABEL[facts.margin_momentum]}"
+            f"（融資動能 {facts.margin_momentum_pct:+.1f}%）"
+        )
+
+    if facts.high_20d is not None and facts.low_20d is not None:
+        anchors.append(
+            f"近20日區間 {facts.low_20d:.2f}～{facts.high_20d:.2f}"
+        )
+    if facts.range_position in {"near_high", "near_low"}:
+        anchors.append(RANGE_POSITION_LABEL[facts.range_position])
+    if facts.breakout_20d_high == "yes":
+        anchors.append(BREAKOUT_LABEL["yes"])
+    elif facts.breakdown_20d_low == "yes":
+        anchors.append(BREAKDOWN_LABEL["yes"])
 
     if facts.price_trend in {"up", "down"} and facts.period_return_pct is not None:
         move = "上漲" if facts.price_trend == "up" else "下跌"
@@ -823,6 +1772,19 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
         anchors.append(VOLUME_ANOMALY_LABEL["spike"])
     elif facts.volume_anomaly == "shrink":
         anchors.append(VOLUME_ANOMALY_LABEL["shrink"])
+    if facts.volume_trend in {"heating", "cooling"}:
+        label = VOLUME_TREND_LABEL[facts.volume_trend]
+        if facts.volume_ma_ratio is not None:
+            anchors.append(f"{label}（5日/20日均量比 {facts.volume_ma_ratio:.2f}）")
+        else:
+            anchors.append(label)
+    if facts.volume_price_divergence in {
+        "bearish_divergence",
+        "bullish_divergence",
+        "confirming_up",
+        "confirming_down",
+    }:
+        anchors.append(VOLUME_PRICE_DIVERGENCE_LABEL[facts.volume_price_divergence])
     if facts.borrow_pressure == "high":
         anchors.append(BORROW_LABEL["high"])
 
@@ -838,8 +1800,89 @@ def facts_to_json(facts: ChipFacts) -> dict:
     return asdict(facts)
 
 
-def facts_summary_for_prompt(facts: ChipFacts) -> str:
+_BASE_RATE_LABEL_NAMES = {
+    "chip_regime": "籌碼型態",
+    "ma_stack": "均線排列",
+    "trend_strength": "趨勢強度",
+    "price_trend": "區間趨勢",
+    "rs_period": "相對大盤",
+    "institutional_consensus": "法人共識",
+    "volatility_regime": "波動狀態",
+    "rsi_zone": "RSI動能",
+}
+
+_BASE_RATE_MIN_SAMPLE_DEFAULT = 20
+
+
+def _base_rate_confidence(n: int, min_sample: int) -> str:
+    """信心等級標註。
+
+    小樣本桶已被 shrinkage 拉回全市場先驗，數字本身不具統計效力；此標註讓報告
+    誠實揭露可信度，避免把 n 很小的桶當成可靠勝率使用。
+    """
+    if n >= min_sample:
+        return "樣本充足"
+    if n >= max(1, min_sample // 2):
+        return "樣本偏少"
+    return "樣本不足"
+
+
+def format_base_rates_for_prompt(
+    facts: ChipFacts,
+    base_rates: dict | None,
+) -> list[str]:
+    """Lines describing how this stock's *current* regimes fared historically.
+
+    Uses shrunk statistics so tiny buckets don't over-claim; empty when the
+    calibration file is missing or no matching bucket has data.
+    """
+    if not base_rates:
+        return []
+    buckets = base_rates.get("buckets", {})
+    if not isinstance(buckets, dict):
+        return []
+    min_sample = int(
+        base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
+        or _BASE_RATE_MIN_SAMPLE_DEFAULT
+    )
+    lines: list[str] = []
+    for key, name in _BASE_RATE_LABEL_NAMES.items():
+        value = getattr(facts, key, "unknown")
+        if value in (None, "", "unknown"):
+            continue
+        stats = buckets.get(key, {}).get(str(value))
+        if not isinstance(stats, dict):
+            continue
+        parts: list[str] = []
+        for slot in ("3d", "5d"):
+            horizon = stats.get(slot)
+            if not isinstance(horizon, dict):
+                continue
+            n = int(horizon.get("n", 0) or 0)
+            if n <= 0:
+                continue
+            p_up = horizon.get("p_up_shrunk", horizon.get("p_up"))
+            mean = horizon.get("mean_excess_shrunk", horizon.get("mean_excess"))
+            if p_up is None or mean is None:
+                continue
+            confidence = _base_rate_confidence(n, min_sample)
+            parts.append(
+                f"{slot} 上漲機率 {p_up * 100:.0f}%、平均超額 {mean:+.1f}%"
+                f"（n={n}，{confidence}）"
+            )
+        if parts:
+            lines.append(f"- {name}={value}：" + "；".join(parts))
+    return lines
+
+
+def facts_summary_for_prompt(
+    facts: ChipFacts,
+    *,
+    base_rates: dict | None = None,
+) -> str:
     """Human-readable, LLM-facing summary of the deterministic facts."""
+    if base_rates is None:
+        base_rates = load_base_rates()
     lines = [
         f"股票：{facts.stock_name}（{facts.stock_id}），資料日期 {facts.trade_date}",
         "",
@@ -872,11 +1915,68 @@ def facts_summary_for_prompt(facts: ChipFacts) -> str:
         lines.append(f"- MA10 vs MA20：{MA_MID_ALIGN_LABEL[facts.ma_mid_alignment]}")
     if facts.ma_stack != "unknown":
         lines.append(f"- 均線排列：{MA_STACK_LABEL[facts.ma_stack]}")
+    if (
+        facts.ma5_cross_ma10 in {"golden", "death"}
+        and facts.ma5_cross_recency in {"today", "within_3d"}
+    ):
+        lines.append(
+            f"- MA5/MA10 交叉：{MA_CROSS_PAIR_LABEL[(facts.ma5_cross_ma10, 'ma5_ma10')]}"
+            f"（{MA_CROSS_RECENCY_LABEL[facts.ma5_cross_recency]}）"
+        )
+    if (
+        facts.ma10_cross_ma20 in {"golden", "death"}
+        and facts.ma10_cross_recency in {"today", "within_3d"}
+    ):
+        lines.append(
+            f"- MA10/MA20 交叉：{MA_CROSS_PAIR_LABEL[(facts.ma10_cross_ma20, 'ma10_ma20')]}"
+            f"（{MA_CROSS_RECENCY_LABEL[facts.ma10_cross_recency]}）"
+        )
     if facts.ma20_slope != "unknown":
         slope_line = f"- 月線斜率：{MA20_SLOPE_LABEL[facts.ma20_slope]}"
         if facts.ma20_slope_pct is not None:
             slope_line += f"（近 5 日 MA20 變化 {facts.ma20_slope_pct:+.2f}%）"
         lines.append(slope_line)
+    if facts.rsi_zone != "unknown" and facts.rsi_14 is not None:
+        lines.append(
+            f"- RSI（14日）：{facts.rsi_14:.1f}，{RSI_ZONE_LABEL[facts.rsi_zone]}"
+        )
+    if facts.volatility_regime != "unknown" and facts.atr_pct is not None:
+        atr_line = (
+            f"- ATR（14日）：{facts.atr_pct:.1f}%"
+            f"（{VOLATILITY_REGIME_LABEL[facts.volatility_regime]}）"
+        )
+        if facts.atr_14 is not None:
+            atr_line += f"，絕對值約 {facts.atr_14:.2f}"
+        lines.append(atr_line)
+    if facts.trend_strength != "unknown" and facts.adx_14 is not None:
+        lines.append(
+            f"- ADX（14日）：{facts.adx_14:.1f}，"
+            f"{TREND_STRENGTH_LABEL[facts.trend_strength]}"
+        )
+    if facts.margin_short_ratio_zone != "unknown" and facts.margin_short_ratio_pct is not None:
+        lines.append(
+            f"- 券資比：{facts.margin_short_ratio_pct:.1f}%，"
+            f"{MARGIN_SHORT_RATIO_ZONE_LABEL[facts.margin_short_ratio_zone]}"
+        )
+    if facts.margin_momentum != "unknown" and facts.margin_momentum_pct is not None:
+        lines.append(
+            f"- 融資動能：{facts.margin_momentum_pct:+.1f}%，"
+            f"{MARGIN_MOMENTUM_LABEL[facts.margin_momentum]}"
+        )
+    if facts.high_20d is not None and facts.low_20d is not None:
+        lines.append(
+            f"- 近20日區間：低 {facts.low_20d:.2f} / 高 {facts.high_20d:.2f}"
+        )
+        if facts.dist_to_20d_high_pct is not None:
+            lines.append(f"- 距20日高：{facts.dist_to_20d_high_pct:.2f}%")
+        if facts.dist_to_20d_low_pct is not None:
+            lines.append(f"- 距20日低：{facts.dist_to_20d_low_pct:.2f}%")
+    if facts.range_position != "unknown":
+        lines.append(f"- 區間位置：{RANGE_POSITION_LABEL[facts.range_position]}")
+    if facts.breakout_20d_high == "yes":
+        lines.append(f"- 突破：{BREAKOUT_LABEL['yes']}")
+    elif facts.breakdown_20d_low == "yes":
+        lines.append(f"- 跌破：{BREAKDOWN_LABEL['yes']}")
     if facts.day_trade_intensity != "unknown":
         lines.append(
             f"- 當沖熱度：{INTENSITY_LABEL[facts.day_trade_intensity]}"
@@ -888,6 +1988,19 @@ def facts_summary_for_prompt(facts: ChipFacts) -> str:
         )
     if facts.volume_anomaly != "unknown":
         lines.append(f"- 成交量：{VOLUME_ANOMALY_LABEL[facts.volume_anomaly]}")
+    if facts.volume_trend != "unknown":
+        trend_line = f"- 量能趨勢：{VOLUME_TREND_LABEL[facts.volume_trend]}"
+        if facts.volume_ma_ratio is not None:
+            trend_line += f"（5日/20日均量比 {facts.volume_ma_ratio:.2f}）"
+        lines.append(trend_line)
+    if facts.vol_ma5_lots is not None and facts.vol_ma20_lots is not None:
+        lines.append(
+            f"- 量均線：5日 {facts.vol_ma5_lots:,} 張 / 20日 {facts.vol_ma20_lots:,} 張"
+        )
+    if facts.volume_price_divergence not in {"unknown", "none"}:
+        lines.append(
+            f"- 價量關係：{VOLUME_PRICE_DIVERGENCE_LABEL[facts.volume_price_divergence]}"
+        )
 
     lines.extend(["", "【區間趨勢】"])
     if facts.foreign_streak_days >= 2 and facts.foreign_streak_dir != 0:
@@ -944,6 +2057,19 @@ def facts_summary_for_prompt(facts: ChipFacts) -> str:
         lines.extend(["", "【背離/風險旗標】"])
         for flag in facts.divergences:
             lines.append(f"- {DIVERGENCE_LABEL.get(flag, flag)}")
+
+    base_rate_lines = format_base_rates_for_prompt(facts, base_rates)
+    if base_rate_lines:
+        lines.extend(
+            [
+                "",
+                "【歷史命中率（同型態個股過去 forward 表現，僅供情境權重參考，"
+                "非保證；已對小樣本做收縮）。每項標註信心等級：樣本充足＞樣本偏少"
+                "＞樣本不足；『樣本不足／偏少』者數字已大幅收縮回全市場平均，"
+                "不可當成可靠勝率，敘述須弱化其權重】",
+            ]
+        )
+        lines.extend(base_rate_lines)
 
     if facts.anchors:
         lines.extend(["", "【必須在正文中引用的關鍵事實 anchors（至少 2 條）】"])

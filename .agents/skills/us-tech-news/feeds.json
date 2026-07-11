@@ -3,6 +3,7 @@
   "lookback_hours": 48,
   "max_items_per_feed": 15,
   "indices": [
+    {"symbol": "^DJI", "name": "道瓊工業指數"},
     {"symbol": "^IXIC", "name": "那斯達克綜合指數"},
     {"symbol": "^SOX", "name": "費城半導體指數"}
   ],

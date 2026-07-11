@@ -20,6 +20,7 @@ from typing import Any
 try:
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse
     from pydantic import BaseModel, Field
     import uvicorn
 except ImportError as exc:
@@ -28,10 +29,14 @@ except ImportError as exc:
     raise SystemExit(10) from exc
 
 ROOT = Path(__file__).resolve().parent.parent
-STOCK_SCRIPT = ROOT / ".agents" / "skills" / "tw-stock-report" / "fetch_chip_report.py"
+STOCK_SKILL_DIR = ROOT / ".agents" / "skills" / "tw-stock-report"
+if str(STOCK_SKILL_DIR) not in sys.path:
+    sys.path.insert(0, str(STOCK_SKILL_DIR))
+STOCK_SCRIPT = STOCK_SKILL_DIR / "fetch_chip_report.py"
 GATE_SCRIPT = ROOT / ".agents" / "skills" / "report-gate" / "report_gate.py"
 POSITION_SCRIPT = ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py"
 STOCK_ROOT = ROOT / "reports" / "stock"
+WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
 
 AGY_TIMEOUT_SEC = 900
@@ -63,6 +68,7 @@ class Job:
     csv_path: str | None = None
     facts_json: dict[str, Any] | None = None
     history_json: list[dict[str, Any]] | None = None
+    summary_json: dict[str, Any] | None = None
     skip_pdf: bool = True
     is_holding: bool = False
     share_count: int | None = None
@@ -291,6 +297,25 @@ def _to_int(value: Any) -> int | None:
     return int(parsed)
 
 
+def _find_summary_path(stock_id: str, trade_date: str | None) -> Path | None:
+    if trade_date:
+        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.summary.json"
+        return candidate if candidate.exists() else None
+
+    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.summary.json"))
+    return matches[-1] if matches else None
+
+
+def _load_summary_json(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _load_facts_json(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
@@ -407,6 +432,8 @@ def _run_pipeline(job_id: str) -> None:
         history_path = _resolve_history_path(stock_id, trade_date)
         facts_json = _load_facts_json(facts_path)
         history_json = _load_history_for_api(history_path)
+        summary_path = _find_summary_path(stock_id, trade_date)
+        summary_json = _load_summary_json(summary_path)
 
         position_markdown: str | None = None
         if job.is_holding:
@@ -443,6 +470,7 @@ def _run_pipeline(job_id: str) -> None:
                 csv_path=str(csv_path.resolve()) if csv_path else None,
                 facts_json=facts_json,
                 history_json=history_json,
+                summary_json=summary_json,
                 trade_date=trade_date or md_path.parent.name,
                 stock_name=stock_name,
                 error=None,
@@ -475,6 +503,38 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/last-trading-date")
+    def last_trading_date(date: str | None = None) -> dict[str, Any]:
+        from twse_calendar import chip_reference_date, resolve_trade_date
+
+        reference = date or chip_reference_date().isoformat()
+        trade_date, note = resolve_trade_date(
+            reference,
+            finmind_token=os.environ.get("FINMIND_TOKEN", ""),
+        )
+        return {
+            "reference_date": reference,
+            "trade_date": trade_date,
+            "note": note,
+        }
+
+    @app.get("/us-indices")
+    def us_indices() -> dict[str, Any]:
+        _ensure_import_paths()
+        try:
+            from us_indices import fetch_us_market_indices_payload
+
+            return fetch_us_market_indices_payload()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"美股指數抓取失敗：{exc}") from exc
+
+    @app.get("/")
+    def web_home() -> FileResponse:
+        index_path = WEB_ROOT / "index.html"
+        if not index_path.exists():
+            raise HTTPException(status_code=404, detail="找不到 web/index.html")
+        return FileResponse(index_path, media_type="text/html; charset=utf-8")
 
     @app.post("/digest")
     def create_digest(body: CreateDigestRequest) -> dict[str, Any]:
@@ -529,6 +589,7 @@ def create_app() -> FastAPI:
             payload.pop("position_markdown", None)
             payload.pop("facts_json", None)
             payload.pop("history_json", None)
+            payload.pop("summary_json", None)
         return {"job": payload}
 
     return app

@@ -58,6 +58,103 @@ def _fmt_pct(raw: str) -> str:
         return text
 
 
+def _fmt_rsi(raw: str) -> str:
+    text = _cell(raw)
+    if not text:
+        return "—"
+    try:
+        from chip_signals import RSI_OVERBOUGHT, RSI_OVERSOLD
+
+        value = float(text)
+        if value >= RSI_OVERBOUGHT:
+            zone = "偏高"
+        elif value <= RSI_OVERSOLD:
+            zone = "偏低"
+        else:
+            zone = "中性區"
+        return f"{value:.1f}（{zone}）"
+    except ValueError:
+        return text
+
+
+def _fmt_atr(raw_atr: str, raw_pct: str) -> str:
+    atr_text = _cell(raw_atr)
+    pct_text = _cell(raw_pct)
+    if not atr_text and not pct_text:
+        return "—"
+    try:
+        if atr_text and pct_text:
+            return f"{float(atr_text):.2f} / {float(pct_text):.1f}%"
+        if pct_text:
+            return f"{float(pct_text):.1f}%"
+        return f"{float(atr_text):.2f}"
+    except ValueError:
+        return pct_text or atr_text or "—"
+
+
+def _fmt_margin_short_ratio(raw: str) -> str:
+    text = _cell(raw)
+    if not text:
+        return "—"
+    try:
+        from chip_signals import (
+            MARGIN_SHORT_RATIO_HIGH_PCT,
+            MARGIN_SHORT_RATIO_LOW_PCT,
+        )
+
+        value = float(text)
+        if value >= MARGIN_SHORT_RATIO_HIGH_PCT:
+            zone = "偏高"
+        elif value <= MARGIN_SHORT_RATIO_LOW_PCT:
+            zone = "偏低"
+        else:
+            zone = "中性"
+        return f"{value:.1f}%（{zone}）"
+    except ValueError:
+        return text
+
+
+def _fmt_margin_momentum(raw: str) -> str:
+    text = _cell(raw)
+    if not text:
+        return "—"
+    try:
+        from chip_signals import (
+            MARGIN_MOMENTUM_COOLING_PCT,
+            MARGIN_MOMENTUM_HEATING_PCT,
+        )
+
+        value = float(text)
+        if value >= MARGIN_MOMENTUM_HEATING_PCT:
+            zone = "偏強"
+        elif value <= MARGIN_MOMENTUM_COOLING_PCT:
+            zone = "偏弱"
+        else:
+            zone = "平穩"
+        return f"{value:+.1f}%（{zone}）"
+    except ValueError:
+        return text
+
+
+def _fmt_adx(raw: str) -> str:
+    text = _cell(raw)
+    if not text:
+        return "—"
+    try:
+        from chip_signals import ADX_STRONG_THRESHOLD, ADX_WEAK_THRESHOLD
+
+        value = float(text)
+        if value >= ADX_STRONG_THRESHOLD:
+            zone = "趨勢明確"
+        elif value <= ADX_WEAK_THRESHOLD:
+            zone = "趨勢偏弱"
+        else:
+            zone = "中性"
+        return f"{value:.1f}（{zone}）"
+    except ValueError:
+        return text
+
+
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -136,6 +233,14 @@ def build_trend_summary_markdown(row: dict[str, str]) -> str | None:
         ["收盤偏離 MA10", _fmt_pct(row.get("收盤偏離MA10_%", ""))],
         ["MA20（月線）", _fmt_num(row.get("MA20", ""))],
         ["收盤偏離 MA20", _fmt_pct(row.get("收盤偏離MA20_%", ""))],
+        ["RSI14（14日）", _fmt_rsi(row.get("RSI14", ""))],
+        [
+            "ATR14（14日）",
+            _fmt_atr(row.get("ATR14", ""), row.get("ATR14_%", "")),
+        ],
+        ["ADX14（14日）", _fmt_adx(row.get("ADX14", ""))],
+        ["券資比", _fmt_margin_short_ratio(row.get("券資比_%", ""))],
+        ["融資動能", _fmt_margin_momentum(row.get("融資動能_%", ""))],
     ]
 
     return "\n".join(

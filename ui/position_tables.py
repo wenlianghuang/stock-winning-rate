@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from chip_tables import load_csv_row, merge_report_body
+from chip_tables import (
+    _fmt_adx,
+    _fmt_atr,
+    _fmt_margin_momentum,
+    _fmt_margin_short_ratio,
+    _fmt_rsi,
+    load_csv_row,
+    merge_report_body,
+)
 from position_prompts import HoldingInfo
 
 
@@ -63,6 +71,27 @@ def build_position_summary_markdown(
         rows.append(["MA20（月線）", ma20_raw])
     if ma20_dev:
         rows.append(["收盤偏離 MA20", f"{ma20_dev}%"])
+    rsi_cell = _fmt_rsi(str(row.get("RSI14", "")))
+    if rsi_cell != "—":
+        rows.append(["RSI14（14日）", rsi_cell])
+    atr_cell = _fmt_atr(str(row.get("ATR14", "")), str(row.get("ATR14_%", "")))
+    if atr_cell != "—":
+        rows.append(["ATR14（14日）", atr_cell])
+    adx_cell = _fmt_adx(str(row.get("ADX14", "")))
+    if adx_cell != "—":
+        rows.append(["ADX14（14日）", adx_cell])
+    ratio_cell = _fmt_margin_short_ratio(str(row.get("券資比_%", "")))
+    if ratio_cell != "—":
+        rows.append(["券資比", ratio_cell])
+    momentum_cell = _fmt_margin_momentum(str(row.get("融資動能_%", "")))
+    if momentum_cell != "—":
+        rows.append(["融資動能", momentum_cell])
+    high_20d = str(row.get("區間20日高", "")).strip()
+    low_20d = str(row.get("區間20日低", "")).strip()
+    if low_20d:
+        rows.append(["近20日低（停損參考）", low_20d])
+    if high_20d:
+        rows.append(["近20日高（停利/壓力參考）", high_20d])
     if holding.note.strip():
         rows.append(["備註", holding.note.strip()])
 

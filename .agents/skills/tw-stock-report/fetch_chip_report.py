@@ -15,6 +15,8 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 
+from twse_calendar import resolve_lookback_dates, resolve_trade_date
+
 FINMIND_DATA_URL = "https://api.finmindtrade.com/api/v4/data"
 YAHOO_BROKER_URL = "https://tw.stock.yahoo.com/quote/{symbol}.TW/broker-trading"
 YAHOO_BROKER_API = (
@@ -32,6 +34,9 @@ DEFAULT_CHART_LOOKBACK_DAYS = 60
 MA5_PERIOD = 5
 MA10_PERIOD = 10
 MA20_PERIOD = 20
+RSI14_PERIOD = 14
+ATR14_PERIOD = 14
+ADX14_PERIOD = 14
 MARKET_INDEX_ID = "TAIEX"  # 加權指數（FinMind TaiwanStockPrice data_id）
 
 DAILY_COLUMNS = [
@@ -92,6 +97,23 @@ SUMMARY_COLUMNS = [
     "MA20",
     "收盤偏離MA20_%",
     "MA20斜率_%",
+    "RSI14",
+    "ATR14",
+    "ATR14_%",
+    "ADX14",
+    "區間20日高",
+    "區間20日低",
+    "距20日高_%",
+    "距20日低_%",
+    "突破20日高",
+    "跌破20日低",
+    "量均線5_張",
+    "量均線20_張",
+    "量均線比",
+    "MA5交叉MA10",
+    "MA10交叉MA20",
+    "券資比_%",
+    "融資動能_%",
 ]
 
 # 大盤（加權指數）脈絡欄位：屬當日全市場資料，每檔快照共用同一組數字。
@@ -167,71 +189,7 @@ def load_stock_ids(
     return stock_ids
 
 
-def fetch_trading_dates(
-    client: FinMindClient,
-    end_date: datetime.date,
-    lookback_days: int = 90,
-) -> list[str]:
-    start_date = end_date - timedelta(days=lookback_days)
-    rows = client.fetch_dataset(
-        "TaiwanStockTradingDate",
-        start_date=start_date.isoformat(),
-        end_date=end_date.isoformat(),
-    )
-    return sorted(row["date"] for row in rows)
-
-
-def resolve_trade_date(
-    client: FinMindClient, requested_date: str | None
-) -> tuple[str, str | None]:
-    """Resolve to the latest Taiwan trading day on or before the reference date."""
-    today = datetime.now().date()
-    reference = (
-        datetime.strptime(requested_date, "%Y-%m-%d").date()
-        if requested_date
-        else today
-    )
-
-    trading_dates = fetch_trading_dates(client, reference)
-    if not trading_dates:
-        trading_dates = fetch_trading_dates(client, today, lookback_days=180)
-
-    if not trading_dates:
-        fallback = (reference - timedelta(days=1)).isoformat()
-        return fallback, f"無法取得台股交易日曆，暫用 {fallback}"
-
-    eligible = [d for d in trading_dates if d <= reference.isoformat()]
-    resolved = eligible[-1] if eligible else trading_dates[-1]
-
-    if resolved == reference.isoformat():
-        return resolved, None
-
-    weekday_names = ["一", "二", "三", "四", "五", "六", "日"]
-    ref_label = (
-        f"指定日期 {requested_date}"
-        if requested_date
-        else (
-            f"今日（{reference.isoformat()} 星期"
-            f"{weekday_names[reference.weekday()]}）"
-        )
-    )
-    note = f"{ref_label} 非台股交易日，已改用最近交易日 {resolved}"
-    return resolved, note
-
-
-def resolve_lookback_dates(
-    client: FinMindClient,
-    trade_date: str,
-    lookback_days: int,
-) -> list[str]:
-    """Return the last N trading days up to and including trade_date."""
-    end = datetime.strptime(trade_date, "%Y-%m-%d").date()
-    calendar_span = max(lookback_days * 4, 30)
-    trading_dates = fetch_trading_dates(client, end, lookback_days=calendar_span)
-    eligible = [d for d in trading_dates if d <= trade_date]
-    if not eligible:
-        return [trade_date]
-    return eligible[-lookback_days:]
+from twse_calendar import resolve_lookback_dates, resolve_trade_date
 
 
 def load_stock_names(client: FinMindClient) -> dict[str, str]:
@@ -589,6 +547,162 @@ def _ma_deviation_pct(close: float | None, ma: float | None) -> float | str:
     return round((close - ma) / ma * 100, 2)
 
 
+def _rsi_wilder(closes: list[float], period: int = RSI14_PERIOD) -> float | str:
+    """Wilder RSI; needs at least period + 1 closes."""
+    if len(closes) < period + 1:
+        return ""
+    avg_gain = 0.0
+    avg_loss = 0.0
+    for index in range(1, period + 1):
+        delta = closes[index] - closes[index - 1]
+        if delta > 0:
+            avg_gain += delta
+        else:
+            avg_loss -= delta
+    avg_gain /= period
+    avg_loss /= period
+
+    for index in range(period + 1, len(closes)):
+        delta = closes[index] - closes[index - 1]
+        gain = max(delta, 0.0)
+        loss = max(-delta, 0.0)
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return round(100.0 - 100.0 / (1.0 + rs), 2)
+
+
+def _true_ranges(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+) -> list[float]:
+    if not highs or not lows or not closes:
+        return []
+    length = min(len(highs), len(lows), len(closes))
+    trs: list[float] = []
+    for index in range(length):
+        if index == 0:
+            trs.append(highs[index] - lows[index])
+            continue
+        tr = max(
+            highs[index] - lows[index],
+            abs(highs[index] - closes[index - 1]),
+            abs(lows[index] - closes[index - 1]),
+        )
+        trs.append(tr)
+    return trs
+
+
+def _atr_wilder(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = ATR14_PERIOD,
+) -> float | str:
+    trs = _true_ranges(highs, lows, closes)
+    if len(trs) < period:
+        return ""
+    atr = sum(trs[:period]) / period
+    for index in range(period, len(trs)):
+        atr = (atr * (period - 1) + trs[index]) / period
+    return round(atr, 4)
+
+
+def _atr_pct(atr: float | str, close: float | None) -> float | str:
+    if close is None or close <= 0:
+        return ""
+    if atr in ("", None):
+        return ""
+    try:
+        return round(float(atr) / close * 100, 2)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _margin_short_ratio_pct(
+    margin_lots: int | None,
+    short_lots: int | None,
+) -> float | str:
+    if margin_lots is None or short_lots is None or margin_lots <= 0:
+        return ""
+    return round(short_lots / margin_lots * 100, 2)
+
+
+def _margin_momentum_pct(
+    first_margin: int | None,
+    last_margin: int | None,
+) -> float | str:
+    if first_margin is None or last_margin is None or first_margin <= 0:
+        return ""
+    return round((last_margin - first_margin) / first_margin * 100, 2)
+
+
+def _adx_wilder(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = ADX14_PERIOD,
+) -> float | str:
+    """Wilder ADX; needs roughly 2 * period OHLC bars."""
+    length = min(len(highs), len(lows), len(closes))
+    if length < period * 2:
+        return ""
+
+    plus_dm = [0.0]
+    minus_dm = [0.0]
+    tr = [0.0]
+    for index in range(1, length):
+        up = highs[index] - highs[index - 1]
+        down = lows[index - 1] - lows[index]
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        tr.append(
+            max(
+                highs[index] - lows[index],
+                abs(highs[index] - closes[index - 1]),
+                abs(lows[index] - closes[index - 1]),
+            )
+        )
+
+    atr = sum(tr[1 : period + 1])
+    smooth_plus = sum(plus_dm[1 : period + 1])
+    smooth_minus = sum(minus_dm[1 : period + 1])
+
+    dx_values: list[float] = []
+    adx_values: list[float] = []
+
+    for index in range(period, length):
+        if index > period:
+            atr = atr - atr / period + tr[index]
+            smooth_plus = smooth_plus - smooth_plus / period + plus_dm[index]
+            smooth_minus = smooth_minus - smooth_minus / period + minus_dm[index]
+
+        if atr == 0:
+            dx = 0.0
+        else:
+            plus_di = 100.0 * smooth_plus / atr
+            minus_di = 100.0 * smooth_minus / atr
+            denom = plus_di + minus_di
+            dx = 100.0 * abs(plus_di - minus_di) / denom if denom > 0 else 0.0
+        dx_values.append(dx)
+
+        if len(dx_values) >= period:
+            if not adx_values:
+                adx_values.append(sum(dx_values[:period]) / period)
+            else:
+                adx_values.append(
+                    (adx_values[-1] * (period - 1) + dx) / period
+                )
+
+    if not adx_values:
+        return ""
+    return round(adx_values[-1], 2)
+
+
 def _ma20_slope_pct(
     closes: list[float],
     *,
@@ -619,11 +733,174 @@ def _trailing_closes_from_dataset(
     return closes
 
 
+def _trailing_highs_lows_from_dataset(
+    price_by_date: dict[str, dict[str, Any]],
+    end_date: str,
+) -> tuple[list[float], list[float]]:
+    highs: list[float] = []
+    lows: list[float] = []
+    for day in sorted(price_by_date):
+        if day > end_date:
+            continue
+        high = _to_float(price_by_date[day].get("max"))
+        low = _to_float(price_by_date[day].get("min"))
+        if high is not None:
+            highs.append(high)
+        if low is not None:
+            lows.append(low)
+    return highs, lows
+
+
+def _trailing_volumes_from_dataset(
+    price_by_date: dict[str, dict[str, Any]],
+    end_date: str,
+) -> list[int]:
+    volumes: list[int] = []
+    for day in sorted(price_by_date):
+        if day > end_date:
+            continue
+        trading_volume = price_by_date[day].get("Trading_Volume")
+        if trading_volume is None:
+            continue
+        lots = shares_to_lots(int(trading_volume))
+        if lots != "":
+            volumes.append(int(lots))
+    return volumes
+
+
+def _volume_moving_average(volumes: list[int], period: int) -> float | None:
+    if len(volumes) < period:
+        return None
+    return sum(volumes[-period:]) / period
+
+
+def _volume_summary_fields(volumes: list[int]) -> dict[str, Any]:
+    empty = {
+        "量均線5_張": "",
+        "量均線20_張": "",
+        "量均線比": "",
+    }
+    vol_ma5 = _volume_moving_average(volumes, MA5_PERIOD)
+    vol_ma20 = _volume_moving_average(volumes, MA20_PERIOD)
+    if vol_ma5 is None or vol_ma20 is None or vol_ma20 <= 0:
+        return empty
+    return {
+        "量均線5_張": int(round(vol_ma5)),
+        "量均線20_張": int(round(vol_ma20)),
+        "量均線比": round(vol_ma5 / vol_ma20, 2),
+    }
+
+
+def _ma_series(closes: list[float], period: int) -> list[float | None]:
+    series: list[float | None] = []
+    for end in range(1, len(closes) + 1):
+        window = closes[:end]
+        if len(window) < period:
+            series.append(None)
+        else:
+            series.append(sum(window[-period:]) / period)
+    return series
+
+
+def _cross_event_at_index(
+    short_series: list[float | None],
+    long_series: list[float | None],
+    index: int,
+) -> str:
+    if index < 1:
+        return "none"
+    short_prev, long_prev = short_series[index - 1], long_series[index - 1]
+    short_now, long_now = short_series[index], long_series[index]
+    if None in (short_prev, long_prev, short_now, long_now):
+        return "none"
+    if short_prev <= long_prev and short_now > long_now:
+        return "golden"
+    if short_prev >= long_prev and short_now < long_now:
+        return "death"
+    return "none"
+
+
+def _recent_ma_cross(
+    closes: list[float],
+    short_period: int,
+    long_period: int,
+    *,
+    lookback_days: int = 3,
+) -> str:
+    min_len = max(short_period, long_period) + 1
+    if len(closes) < min_len:
+        return ""
+    short_series = _ma_series(closes, short_period)
+    long_series = _ma_series(closes, long_period)
+    last_index = len(closes) - 1
+    start_index = max(1, last_index - lookback_days)
+    for index in range(last_index, start_index - 1, -1):
+        event = _cross_event_at_index(short_series, long_series, index)
+        if event == "golden":
+            return "黃金交叉"
+        if event == "death":
+            return "死亡交叉"
+    return "無"
+
+
+def _ma_cross_summary_fields(closes: list[float]) -> dict[str, str]:
+    if not closes:
+        return {"MA5交叉MA10": "", "MA10交叉MA20": ""}
+    return {
+        "MA5交叉MA10": _recent_ma_cross(closes, MA5_PERIOD, MA10_PERIOD),
+        "MA10交叉MA20": _recent_ma_cross(closes, MA10_PERIOD, MA20_PERIOD),
+    }
+
+
+def _range_summary_fields(
+    highs: list[float],
+    lows: list[float],
+    close: float | None,
+    *,
+    period: int = MA20_PERIOD,
+    near_band_pct: float = 2.0,
+) -> dict[str, Any]:
+    empty = {
+        "區間20日高": "",
+        "區間20日低": "",
+        "距20日高_%": "",
+        "距20日低_%": "",
+        "突破20日高": "",
+        "跌破20日低": "",
+    }
+    if close is None or len(highs) < period or len(lows) < period:
+        return empty
+
+    window_highs = highs[-period:]
+    window_lows = lows[-period:]
+    high_20d = max(window_highs)
+    low_20d = min(window_lows)
+    if high_20d <= 0 or low_20d <= 0:
+        return empty
+
+    dist_high = (high_20d - close) / high_20d * 100
+    dist_low = (close - low_20d) / low_20d * 100
+    prior_high = max(highs[-period:-1])
+    prior_low = min(lows[-period:-1])
+
+    return {
+        "區間20日高": round(high_20d, 2),
+        "區間20日低": round(low_20d, 2),
+        "距20日高_%": round(dist_high, 2),
+        "距20日低_%": round(dist_low, 2),
+        "突破20日高": "是" if close > prior_high else "否",
+        "跌破20日低": "是" if close < prior_low else "否",
+    }
+
+
 def compute_summary_fields(
     daily_rows: list[dict[str, Any]],
     *,
     lookback_days: int,
     price_closes: list[float] | None = None,
+    price_highs: list[float] | None = None,
+    price_lows: list[float] | None = None,
+    price_volumes: list[int] | None = None,
 ) -> dict[str, Any]:
     if not daily_rows:
         return {key: "" for key in SUMMARY_COLUMNS}
@@ -646,6 +923,16 @@ def compute_summary_fields(
     closes = [_to_float(row.get("收盤價")) for row in daily_rows]
     valid_closes = [value for value in closes if value is not None]
     trailing_closes = price_closes if price_closes else valid_closes
+    trailing_highs = price_highs if price_highs else [
+        _to_float(row.get("最高價"))
+        for row in daily_rows
+        if _to_float(row.get("最高價")) is not None
+    ]
+    trailing_lows = price_lows if price_lows else [
+        _to_float(row.get("最低價"))
+        for row in daily_rows
+        if _to_float(row.get("最低價")) is not None
+    ]
 
     ma5_val = _moving_average(trailing_closes, MA5_PERIOD)
     ma5 = ma5_val if ma5_val is not None else ""
@@ -663,6 +950,15 @@ def compute_summary_fields(
     ma_deviation = _ma_deviation_pct(last_close, ma5_val)
     ma10_deviation = _ma_deviation_pct(last_close, ma10_val)
     ma20_deviation = _ma_deviation_pct(last_close, ma20_val)
+
+    range_fields = _range_summary_fields(
+        price_highs or [],
+        price_lows or [],
+        last_close,
+    )
+    volume_fields = _volume_summary_fields(price_volumes or [])
+    cross_fields = _ma_cross_summary_fields(trailing_closes)
+    atr_val = _atr_wilder(trailing_highs, trailing_lows, trailing_closes)
 
     return {
         "回看天數": actual_days,
@@ -692,6 +988,15 @@ def compute_summary_fields(
         "MA20": ma20,
         "收盤偏離MA20_%": ma20_deviation,
         "MA20斜率_%": _ma20_slope_pct(trailing_closes),
+        "RSI14": _rsi_wilder(trailing_closes),
+        "ATR14": atr_val,
+        "ATR14_%": _atr_pct(atr_val, last_close),
+        "ADX14": _adx_wilder(trailing_highs, trailing_lows, trailing_closes),
+        "券資比_%": _margin_short_ratio_pct(last_margin, last_short),
+        "融資動能_%": _margin_momentum_pct(first_margin, last_margin),
+        **range_fields,
+        **volume_fields,
+        **cross_fields,
     }
 
 
@@ -708,7 +1013,7 @@ def fetch_market_context(
     if not lookback_dates:
         lookback_dates = [trade_date]
 
-    ma_dates = resolve_lookback_dates(client, trade_date, MA20_PERIOD)
+    ma_dates = resolve_lookback_dates(trade_date, MA20_PERIOD)
     range_start = min(lookback_dates[0], ma_dates[0])
     try:
         rows = index_rows_by_date(
@@ -808,11 +1113,15 @@ def build_stock_report(
         lookback_dates = [trade_date]
 
     chart_days = max(chart_lookback_days, MA20_PERIOD)
-    ma_price_dates = resolve_lookback_dates(client, trade_date, MA20_PERIOD)
-    chart_dates = resolve_lookback_dates(client, trade_date, chart_days)
+    ma_price_dates = resolve_lookback_dates(trade_date, MA20_PERIOD)
+    chart_dates = resolve_lookback_dates(trade_date, chart_days)
     range_start = min(lookback_dates[0], ma_price_dates[0], chart_dates[0])
     datasets = fetch_stock_datasets(client, stock_id, range_start, trade_date)
     price_closes = _trailing_closes_from_dataset(datasets["price"], trade_date)
+    price_highs, price_lows = _trailing_highs_lows_from_dataset(
+        datasets["price"], trade_date
+    )
+    price_volumes = _trailing_volumes_from_dataset(datasets["price"], trade_date)
 
     daily_rows: list[dict[str, Any]] = []
     for day in lookback_dates:
@@ -827,6 +1136,9 @@ def build_stock_report(
         daily_rows,
         lookback_days=len(lookback_dates),
         price_closes=price_closes,
+        price_highs=price_highs,
+        price_lows=price_lows,
+        price_volumes=price_volumes,
     )
     market = market_context or {col: "" for col in MARKET_COLUMNS}
     snapshot = {**daily_rows[-1], **summary, **market}
@@ -915,8 +1227,8 @@ def main() -> int:
     try:
         stock_ids = load_stock_ids(args.stocks, args.watchlist)
         client = FinMindClient(token=token)
-        trade_date, date_note = resolve_trade_date(client, args.date)
-        lookback_dates = resolve_lookback_dates(client, trade_date, lookback_days)
+        trade_date, date_note = resolve_trade_date(args.date, finmind_token=token)
+        lookback_dates = resolve_lookback_dates(trade_date, lookback_days)
         stock_names = load_stock_names(client)
         yahoo = None if args.skip_major else YahooMajorFlowClient()
         market_context = fetch_market_context(client, trade_date, lookback_dates)

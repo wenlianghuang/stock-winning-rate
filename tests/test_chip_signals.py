@@ -37,12 +37,19 @@ def _row(**overrides) -> dict[str, str]:
         "區間主力累計_張": "-500",
         "區間融資餘額淨變化_張": "800",
         "區間融券餘額淨變化_張": "20",
+        "融資今日餘額_張": "10000",
+        "融券今日餘額_張": "3000",
+        "券資比_%": "30.0",
+        "融資動能_%": "8.0",
         "區間成交量均值_張": "12000",
         "區間當沖佔比均值_%": "30",
         "MA5": "32.0",
         "MA10": "31.0",
         "MA20": "30.0",
         "MA20斜率_%": "1.2",
+        "量均線5_張": "15000",
+        "量均線20_張": "10000",
+        "量均線比": "1.5",
     }
     base.update(overrides)
     return base
@@ -66,6 +73,118 @@ class ChipSignalsTests(unittest.TestCase):
     def test_volume_spike(self) -> None:
         facts = build_chip_facts(_row(成交量_張="20000", 區間成交量均值_張="10000"))
         self.assertEqual(facts.volume_anomaly, "spike")
+
+    def test_volume_trend_heating(self) -> None:
+        facts = build_chip_facts(_row())
+        self.assertEqual(facts.volume_trend, "heating")
+        self.assertEqual(facts.volume_ma_ratio, 1.5)
+
+    def test_volume_trend_cooling(self) -> None:
+        facts = build_chip_facts(
+            _row(**{"量均線5_張": "8000", "量均線20_張": "10000", "量均線比": "0.8"})
+        )
+        self.assertEqual(facts.volume_trend, "cooling")
+
+    def test_volume_price_confirming_up(self) -> None:
+        facts = build_chip_facts(_row(**{"區間漲跌幅_%": "5.0"}))
+        self.assertEqual(facts.price_trend, "up")
+        self.assertEqual(facts.volume_trend, "heating")
+        self.assertEqual(facts.volume_price_divergence, "confirming_up")
+
+    def test_volume_price_bearish_divergence(self) -> None:
+        facts = build_chip_facts(
+            _row(
+                **{
+                    "區間漲跌幅_%": "5.0",
+                    "量均線5_張": "7000",
+                    "量均線20_張": "10000",
+                    "量均線比": "0.7",
+                }
+            )
+        )
+        self.assertEqual(facts.volume_price_divergence, "bearish_divergence")
+
+    def test_volume_trend_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row())
+        body = "## 當日籌碼解讀\n量能降溫，交投轉弱。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_volume_trend_mismatch", codes)
+
+    def test_volume_price_divergence_mismatch(self) -> None:
+        facts = build_chip_facts(
+            _row(
+                **{
+                    "區間漲跌幅_%": "5.0",
+                    "量均線5_張": "7000",
+                    "量均線20_張": "10000",
+                    "量均線比": "0.7",
+                }
+            )
+        )
+        body = "## 近 N 日籌碼趨勢\n價量配合偏多，量價同步走強。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_volume_price_divergence_mismatch", codes)
+
+    def test_volume_trend_from_history(self) -> None:
+        history = []
+        for index in range(20):
+            volume = 10000 + (index * 200 if index >= 15 else 0)
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "成交量_張": str(volume),
+                    "收盤價": "30",
+                }
+            )
+        row = _row()
+        for key in ("量均線5_張", "量均線20_張", "量均線比"):
+            row.pop(key, None)
+        facts = build_chip_facts(row, history)
+        self.assertEqual(facts.volume_trend, "heating")
+
+    def test_ma5_golden_cross_from_csv(self) -> None:
+        facts = build_chip_facts(_row(**{"MA5交叉MA10": "黃金交叉"}))
+        self.assertEqual(facts.ma5_cross_ma10, "golden")
+        self.assertEqual(facts.ma5_cross_recency, "today")
+
+    def test_ma5_death_cross_from_closes(self) -> None:
+        history = []
+        closes = [40.0 + i * 0.5 for i in range(19)] + [35.0]
+        for index, close in enumerate(closes):
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "收盤價": str(close),
+                }
+            )
+        row = _row()
+        row.pop("收盤價", None)
+        row["收盤價"] = str(closes[-1])
+        facts = build_chip_facts(row, history)
+        self.assertEqual(facts.ma5_cross_ma10, "death")
+        self.assertEqual(facts.ma5_cross_recency, "today")
+
+    def test_ma10_golden_cross_from_closes(self) -> None:
+        history = []
+        closes = [50.0 - i * 0.1 for i in range(24)] + [65.0]
+        for index, close in enumerate(closes):
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "收盤價": str(close),
+                }
+            )
+        row = _row()
+        row["收盤價"] = str(closes[-1])
+        facts = build_chip_facts(row, history)
+        self.assertEqual(facts.ma10_cross_ma20, "golden")
+        self.assertEqual(facts.ma10_cross_recency, "today")
+
+    def test_ma5_cross_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"MA5交叉MA10": "黃金交叉"}))
+        body = "## 當日籌碼解讀\nMA5死亡交叉MA10，短線轉弱。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_ma5_ma10_cross_mismatch", codes)
 
     def test_ma20_position_and_bullish_alignment(self) -> None:
         # 收盤同時高於 MA5(+2%) 與 MA20(+1%) → 短中線同步偏多
@@ -153,6 +272,53 @@ class ChipSignalsTests(unittest.TestCase):
         self.assertEqual(facts.ma20_slope, "rising")
         self.assertIsNotNone(facts.ma20_slope_pct)
         self.assertGreater(facts.ma20_slope_pct or 0, 0)
+
+    def test_breakdown_20d_low(self) -> None:
+        facts = build_chip_facts(
+            _row(
+                **{
+                    "收盤價": "44",
+                    "區間20日高": "55",
+                    "區間20日低": "45",
+                    "距20日高_%": "20",
+                    "距20日低_%": "-2.22",
+                    "突破20日高": "否",
+                    "跌破20日低": "是",
+                }
+            )
+        )
+        self.assertEqual(facts.breakdown_20d_low, "yes")
+        self.assertEqual(facts.range_position, "near_low")
+
+    def test_range_levels_from_history(self) -> None:
+        history = []
+        for index in range(20):
+            price = 100 + index
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "最高價": str(price + 1),
+                    "最低價": str(price - 1),
+                    "收盤價": str(price),
+                }
+            )
+        row = _row()
+        for key in (
+            "區間20日高",
+            "區間20日低",
+            "距20日高_%",
+            "距20日低_%",
+            "突破20日高",
+            "跌破20日低",
+        ):
+            row.pop(key, None)
+        row["收盤價"] = "119"
+        row["最高價"] = "120"
+        row["最低價"] = "118"
+        facts = build_chip_facts(row, history)
+        self.assertIsNotNone(facts.high_20d)
+        self.assertIsNotNone(facts.low_20d)
+        self.assertNotEqual(facts.range_position, "unknown")
 
     def test_ma20_position_fact_check(self) -> None:
         # facts 判定跌破月線，正文卻寫站上月線 → fact_ma20_position
@@ -269,6 +435,197 @@ class ChipSignalsTests(unittest.TestCase):
         facts = build_chip_facts(row)
         self.assertEqual(facts.institutional_consensus, "bearish")
         self.assertIn("price_up_foreign_sell", facts.divergences)
+
+
+class RsiSignalsTests(unittest.TestCase):
+    def test_rsi_from_csv_overbought(self) -> None:
+        facts = build_chip_facts(_row(**{"RSI14": "75.5"}))
+        self.assertEqual(facts.rsi_14, 75.5)
+        self.assertEqual(facts.rsi_zone, "overbought")
+        self.assertTrue(any("RSI14" in anchor for anchor in facts.anchors))
+
+    def test_rsi_from_csv_oversold(self) -> None:
+        facts = build_chip_facts(_row(**{"RSI14": "28.0"}))
+        self.assertEqual(facts.rsi_zone, "oversold")
+
+    def test_rsi_computed_from_history(self) -> None:
+        history = []
+        closes = [100.0 - index * 0.8 for index in range(20)]
+        for index, close in enumerate(closes):
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "收盤價": str(close),
+                }
+            )
+        row = _row()
+        row["收盤價"] = str(closes[-1])
+        facts = build_chip_facts(row, history)
+        self.assertIsNotNone(facts.rsi_14)
+        self.assertIn(facts.rsi_zone, {"overbought", "oversold", "neutral"})
+
+    def test_rsi_zone_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"RSI14": "75.0"}))
+        body = "## 近 N 日籌碼趨勢\nRSI 超賣區，動能偏弱，短線仍有下探風險。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_rsi_zone_mismatch", codes)
+
+    def test_rsi_zone_consistent_passes(self) -> None:
+        facts = build_chip_facts(_row(**{"RSI14": "75.0"}))
+        body = "## 近 N 日籌碼趨勢\nRSI 偏高，動能過熱，留意回檔。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertNotIn("fact_rsi_zone_mismatch", codes)
+
+
+class AtrSignalsTests(unittest.TestCase):
+    def test_atr_from_csv_high_volatility(self) -> None:
+        facts = build_chip_facts(_row(**{"ATR14": "1.25", "ATR14_%": "4.2"}))
+        self.assertEqual(facts.atr_14, 1.25)
+        self.assertEqual(facts.atr_pct, 4.2)
+        self.assertEqual(facts.volatility_regime, "high")
+        self.assertTrue(any("ATR14" in anchor for anchor in facts.anchors))
+
+    def test_atr_computed_from_history(self) -> None:
+        history = []
+        for index in range(20):
+            base = 100.0 + index * 0.2
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "開盤價": str(base - 0.5),
+                    "最高價": str(base + 2.0),
+                    "最低價": str(base - 2.0),
+                    "收盤價": str(base),
+                }
+            )
+        row = _row()
+        row["收盤價"] = "104.0"
+        row["開盤價"] = "103.5"
+        row["最高價"] = "106.0"
+        row["最低價"] = "102.0"
+        facts = build_chip_facts(row, history)
+        self.assertIsNotNone(facts.atr_14)
+        self.assertIsNotNone(facts.atr_pct)
+        self.assertIn(facts.volatility_regime, {"high", "normal", "low"})
+
+    def test_volatility_regime_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"ATR14": "1.25", "ATR14_%": "4.2"}))
+        body = "## 近 N 日籌碼趨勢\n波動偏低，區間參考較可靠。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_volatility_regime_mismatch", codes)
+
+    def test_volatility_regime_consistent_passes(self) -> None:
+        facts = build_chip_facts(_row(**{"ATR14": "1.25", "ATR14_%": "4.2"}))
+        body = "## 近 N 日籌碼趨勢\n波動偏高，ATR 擴大，停損宜保守。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertNotIn("fact_volatility_regime_mismatch", codes)
+
+
+class AdxSignalsTests(unittest.TestCase):
+    def test_adx_from_csv_strong_trend(self) -> None:
+        facts = build_chip_facts(_row(**{"ADX14": "32.5"}))
+        self.assertEqual(facts.adx_14, 32.5)
+        self.assertEqual(facts.trend_strength, "strong")
+        self.assertTrue(any("ADX14" in anchor for anchor in facts.anchors))
+
+    def test_adx_from_csv_weak_trend(self) -> None:
+        facts = build_chip_facts(_row(**{"ADX14": "15.0"}))
+        self.assertEqual(facts.trend_strength, "weak")
+
+    def test_adx_computed_from_history(self) -> None:
+        history = []
+        for index in range(35):
+            base = 100.0 + index * 1.5
+            history.append(
+                {
+                    "日期": f"2026-06-{index + 1:02d}",
+                    "開盤價": str(base - 0.5),
+                    "最高價": str(base + 1.0),
+                    "最低價": str(base - 0.5),
+                    "收盤價": str(base),
+                }
+            )
+        row = _row()
+        row["收盤價"] = str(100.0 + 34 * 1.5)
+        row["最高價"] = str(100.0 + 34 * 1.5 + 1.0)
+        row["最低價"] = str(100.0 + 34 * 1.5 - 0.5)
+        facts = build_chip_facts(row, history)
+        self.assertIsNotNone(facts.adx_14)
+        self.assertIn(facts.trend_strength, {"strong", "weak", "neutral"})
+
+    def test_trend_strength_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"ADX14": "32.0"}))
+        body = "## 近 N 日籌碼趨勢\nADX 偏低，趨勢不明，易震盪盤整。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_trend_strength_mismatch", codes)
+
+    def test_trend_strength_consistent_passes(self) -> None:
+        facts = build_chip_facts(_row(**{"ADX14": "32.0"}))
+        body = "## 近 N 日籌碼趨勢\nADX 偏高，趨勢明確，均線方向較可信。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertNotIn("fact_trend_strength_mismatch", codes)
+
+
+class MarginChipSignalsTests(unittest.TestCase):
+    def test_margin_short_ratio_from_csv_high(self) -> None:
+        facts = build_chip_facts(_row(**{"券資比_%": "30.0"}))
+        self.assertEqual(facts.margin_short_ratio_pct, 30.0)
+        self.assertEqual(facts.margin_short_ratio_zone, "high")
+        self.assertTrue(any("券資比" in anchor for anchor in facts.anchors))
+
+    def test_margin_short_ratio_computed_from_balances(self) -> None:
+        row = _row(
+            **{
+                "融資今日餘額_張": "10000",
+                "融券今日餘額_張": "500",
+            }
+        )
+        row.pop("券資比_%", None)
+        facts = build_chip_facts(row)
+        self.assertEqual(facts.margin_short_ratio_pct, 5.0)
+        self.assertEqual(facts.margin_short_ratio_zone, "low")
+
+    def test_margin_momentum_heating(self) -> None:
+        facts = build_chip_facts(_row(**{"融資動能_%": "8.0"}))
+        self.assertEqual(facts.margin_momentum, "heating")
+        self.assertEqual(facts.margin_momentum_pct, 8.0)
+
+    def test_margin_momentum_from_history(self) -> None:
+        history = [
+            {"日期": "2026-07-01", "融資今日餘額_張": "10000"},
+            {"日期": "2026-07-02", "融資今日餘額_張": "10200"},
+            {"日期": "2026-07-03", "融資今日餘額_張": "10500"},
+        ]
+        row = _row(**{"融資今日餘額_張": "10500"})
+        row.pop("融資動能_%", None)
+        row.pop("券資比_%", None)
+        facts = build_chip_facts(row, history)
+        self.assertEqual(facts.margin_momentum, "heating")
+        self.assertAlmostEqual(facts.margin_momentum_pct or 0, 5.0)
+
+    def test_margin_short_ratio_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"券資比_%": "30.0"}))
+        body = "## 近 N 日籌碼趨勢\n券資比偏低，融券壓力小。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_margin_short_ratio_mismatch", codes)
+
+    def test_margin_momentum_mismatch_fact_check(self) -> None:
+        facts = build_chip_facts(_row(**{"融資動能_%": "8.0"}))
+        body = "## 近 N 日籌碼趨勢\n融資動能偏弱，融資餘額減少。\n"
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertIn("fact_margin_momentum_mismatch", codes)
+
+    def test_margin_signals_consistent_passes(self) -> None:
+        facts = build_chip_facts(
+            _row(**{"券資比_%": "30.0", "融資動能_%": "8.0"})
+        )
+        body = (
+            "## 近 N 日籌碼趨勢\n"
+            "券資比偏高，融券壓力大；融資動能偏強，融資餘額增加。\n"
+        )
+        codes = [c for c, _ in run_fact_checks(body, facts)]
+        self.assertNotIn("fact_margin_short_ratio_mismatch", codes)
+        self.assertNotIn("fact_margin_momentum_mismatch", codes)
 
 
 class MarketContextTests(unittest.TestCase):
