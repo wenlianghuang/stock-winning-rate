@@ -274,6 +274,52 @@ def _shrink(bucket: dict[str, Any], prior: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sample_regime(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe the backtest sample's own market regime.
+
+    The base rates are forward *excess* over TAIEX, so the market beta is mostly
+    netted out -- but the residual (relative mean-reversion / rotation) is still
+    regime-dependent. Surfacing the sample window + market tilt lets the report
+    flag these hit-rates as *conditional on this regime* (e.g. a bull-dominated
+    window) rather than a regime-agnostic truth.
+    """
+    dates = sorted(str(r.get("trade_date")) for r in records if r.get("trade_date"))
+    stocks = {str(r.get("stock_id")) for r in records if r.get("stock_id")}
+    market: dict[str, Any] = {}
+    for horizon in HORIZONS:
+        slot = f"{horizon}d"
+        rets = [
+            float(mr)
+            for rec in records
+            if (h := rec.get("horizons", {}).get(slot, {})).get("status") == "resolved"
+            and (mr := h.get("market_return_pct")) is not None
+        ]
+        if rets:
+            market[slot] = {
+                "n": len(rets),
+                "mean_return": round(sum(rets) / len(rets), 2),
+                "p_up": round(sum(1 for v in rets if v > 0) / len(rets), 3),
+            }
+    ref = market.get("5d") or market.get("3d") or {}
+    mean_ret = ref.get("mean_return")
+    p_up = ref.get("p_up")
+    if mean_ret is None or p_up is None:
+        regime = "unknown"
+    elif mean_ret >= 1.0 and p_up >= 0.6:
+        regime = "偏多"
+    elif mean_ret <= -1.0 and p_up <= 0.4:
+        regime = "偏空"
+    else:
+        regime = "震盪"
+    return {
+        "start": dates[0] if dates else None,
+        "end": dates[-1] if dates else None,
+        "stocks": len(stocks),
+        "market": market,
+        "regime": regime,
+    }
+
+
 def build_base_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
     global_stats: dict[str, dict[str, Any]] = {}
     for horizon in HORIZONS:
@@ -320,6 +366,7 @@ def build_base_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
         "shrink_k": SHRINK_K,
         "min_bucket_sample": MIN_BUCKET_SAMPLE,
         "horizons": [f"{h}d" for h in HORIZONS],
+        "sample": _sample_regime(records),
         "global": global_stats,
         "buckets": buckets,
     }

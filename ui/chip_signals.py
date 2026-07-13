@@ -1875,6 +1875,218 @@ def format_base_rates_for_prompt(
     return lines
 
 
+# ±此區間內的綜合傾向視為「中性」，避免噪音級數字被讀成方向訊號。
+BASE_RATE_TILT_BAND = 0.3
+
+
+def base_rate_tilt_label(edge: float | None) -> str:
+    """Map an aggregate edge to 偏多/偏空/中性 with a neutral dead-band."""
+    if edge is None:
+        return "中性"
+    if edge > BASE_RATE_TILT_BAND:
+        return "偏多"
+    if edge < -BASE_RATE_TILT_BAND:
+        return "偏空"
+    return "中性"
+
+
+def base_rate_forward_edge(
+    facts,
+    base_rates: dict | None = None,
+    *,
+    min_sample: int | None = None,
+) -> float | None:
+    """Aggregate forward edge (%) of this stock's regimes, *relative to baseline*.
+
+    For every matched regime bucket that reaches ``min_bucket_sample`` (樣本充足),
+    over the 3d + 5d horizons, we take the shrunk mean-excess **minus the global
+    same-horizon mean-excess** and average those. Subtracting the global prior
+    removes the systematic positive tilt that a hand-picked stock universe /
+    sample window bakes into the raw numbers, so the edge means "beats vs lags
+    the whole sample", not "beats the index". Positive ⇒ bullish tilt; ``None``
+    when no reliable bucket matches. Shared by the scenario-weight nudge and the
+    report's base-rate table so both agree.
+    """
+    if base_rates is None:
+        base_rates = load_base_rates()
+    if not base_rates:
+        return None
+    buckets = base_rates.get("buckets", {})
+    if not isinstance(buckets, dict):
+        return None
+    global_stats = base_rates.get("global", {})
+    if not isinstance(global_stats, dict):
+        global_stats = {}
+    if min_sample is None:
+        min_sample = int(
+            base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
+            or _BASE_RATE_MIN_SAMPLE_DEFAULT
+        )
+    values: list[float] = []
+    for key in _BASE_RATE_LABEL_NAMES:
+        value = getattr(facts, key, "unknown")
+        if value in (None, "", "unknown"):
+            continue
+        stats = buckets.get(key, {}).get(str(value))
+        if not isinstance(stats, dict):
+            continue
+        for slot in ("3d", "5d"):
+            horizon = stats.get(slot)
+            if not isinstance(horizon, dict):
+                continue
+            n = int(horizon.get("n", 0) or 0)
+            if n < min_sample:
+                continue
+            mean = horizon.get("mean_excess_shrunk", horizon.get("mean_excess"))
+            if mean is None:
+                continue
+            baseline_row = global_stats.get(slot)
+            baseline = (
+                float(baseline_row["mean_excess"])
+                if isinstance(baseline_row, dict)
+                and baseline_row.get("mean_excess") is not None
+                else 0.0
+            )
+            values.append(float(mean) - baseline)
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
+
+_REGIME_TEXT = {
+    "偏多": "偏多（多頭）",
+    "偏空": "偏空（空頭）",
+    "震盪": "震盪",
+    "unknown": "環境未定",
+}
+
+
+def _base_rate_sample_note(base_rates: dict | None) -> str | None:
+    """Backtest-sample + market-regime caveat, or ``None`` when unavailable.
+
+    Makes the hit-rate block honest about being *conditional on the sample's
+    market regime* and about deferring to the technical/momentum read on
+    conflict, so a technically weak stock isn't read as benign just because a
+    bull-dominated backtest says its regime bucket beat the index.
+    """
+    if not isinstance(base_rates, dict):
+        return None
+    sample = base_rates.get("sample")
+    if not isinstance(sample, dict):
+        return None
+    start, end = sample.get("start"), sample.get("end")
+    stocks = sample.get("stocks")
+    regime = sample.get("regime") or "unknown"
+    market = sample.get("market")
+    ref = (market.get("5d") or market.get("3d") or {}) if isinstance(market, dict) else {}
+
+    span_parts: list[str] = []
+    if start and end:
+        span_parts.append(f"{start}～{end}")
+    if stocks:
+        span_parts.append(f"{stocks} 檔")
+    head = f"回測樣本 {'、'.join(span_parts)}；" if span_parts else ""
+
+    mret, pup = ref.get("mean_return"), ref.get("p_up")
+    regime_txt = _REGIME_TEXT.get(regime, regime)
+    if mret is not None and pup is not None:
+        regime_txt = f"{regime}（5 日均 {mret:+.1f}%、上漲 {pup * 100:.0f}%）"
+    return (
+        f"{head}樣本期大盤{regime_txt}。數字為相對大盤超額、"
+        "已對小樣本收縮，屬「該市場環境下」的條件機率——"
+        "**與技術面/動能判讀衝突時以動能為準**、非保證。"
+    )
+
+
+def build_base_rate_table_markdown(
+    facts,
+    base_rates: dict | None = None,
+) -> str | None:
+    """Deterministic Markdown block of this stock's regime hit-rates.
+
+    Rendered directly by the report (independent of the LLM) so the historical
+    edge is *visible*, not just whispered into the prompt.
+    """
+    if base_rates is None:
+        base_rates = load_base_rates()
+    if not base_rates:
+        return None
+    buckets = base_rates.get("buckets", {})
+    if not isinstance(buckets, dict):
+        return None
+    min_sample = int(
+        base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
+        or _BASE_RATE_MIN_SAMPLE_DEFAULT
+    )
+
+    def _p(horizon: dict | None) -> str:
+        if not isinstance(horizon, dict) or int(horizon.get("n", 0) or 0) <= 0:
+            return "—"
+        p_up = horizon.get("p_up_shrunk", horizon.get("p_up"))
+        return f"{p_up * 100:.0f}%" if p_up is not None else "—"
+
+    def _e(horizon: dict | None) -> str:
+        if not isinstance(horizon, dict) or int(horizon.get("n", 0) or 0) <= 0:
+            return "—"
+        mean = horizon.get("mean_excess_shrunk", horizon.get("mean_excess"))
+        return f"{mean:+.1f}%" if mean is not None else "—"
+
+    rows: list[str] = []
+    for key, name in _BASE_RATE_LABEL_NAMES.items():
+        value = getattr(facts, key, "unknown")
+        if value in (None, "", "unknown"):
+            continue
+        stats = buckets.get(key, {}).get(str(value))
+        if not isinstance(stats, dict):
+            continue
+        h3, h5 = stats.get("3d"), stats.get("5d")
+        n = max(
+            int((h3 or {}).get("n", 0) or 0),
+            int((h5 or {}).get("n", 0) or 0),
+        )
+        if n <= 0:
+            continue
+        confidence = _base_rate_confidence(n, min_sample)
+        rows.append(
+            f"| {name} | {value} | {_p(h3)} | {_e(h3)} | {_p(h5)} | {_e(h5)} "
+            f"| n={n}（{confidence}） |"
+        )
+    if not rows:
+        return None
+
+    note = _base_rate_sample_note(base_rates) or (
+        "依系統 regime 標籤對照回測樣本；已對小樣本收縮，"
+        "與技術面/動能判讀衝突時以動能為準，僅供情境權重參考、非保證。"
+    )
+    lines = [
+        "### 歷史命中率（同型態個股 forward 表現）",
+        f"> {note}",
+        "",
+        "| 維度 | 當前狀態 | 3日勝率 | 3日超額 | 5日勝率 | 5日超額 | 樣本(信心) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        *rows,
+    ]
+    edge = base_rate_forward_edge(facts, base_rates, min_sample=min_sample)
+    if edge is not None:
+        tilt = base_rate_tilt_label(edge)
+        sample = base_rates.get("sample") if isinstance(base_rates, dict) else None
+        regime = sample.get("regime") if isinstance(sample, dict) else None
+        regime_clause = (
+            f"；樣本以「大盤{regime}」環境為主，遇明確反向趨勢時本傾向可能失效"
+            if regime in ("偏多", "偏空", "震盪")
+            else ""
+        )
+        lines.extend(
+            [
+                "",
+                "**綜合歷史傾向：** 扣除全市場同期基準後，樣本充足桶平均 forward 超額 "
+                f"{edge:+.2f}% → {tilt}（中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；已納入操作情境權重"
+                f"{regime_clause}）",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def facts_summary_for_prompt(
     facts: ChipFacts,
     *,
@@ -2066,9 +2278,14 @@ def facts_summary_for_prompt(
                 "【歷史命中率（同型態個股過去 forward 表現，僅供情境權重參考，"
                 "非保證；已對小樣本做收縮）。每項標註信心等級：樣本充足＞樣本偏少"
                 "＞樣本不足；『樣本不足／偏少』者數字已大幅收縮回全市場平均，"
-                "不可當成可靠勝率，敘述須弱化其權重】",
+                "不可當成可靠勝率，敘述須弱化其權重。此為回測樣本市場環境下的"
+                "條件機率，與技術面/動能方向衝突時一律以技術面/動能為準，"
+                "勿讓命中率蓋過空頭結構判讀】",
             ]
         )
+        sample_note = _base_rate_sample_note(base_rates)
+        if sample_note:
+            lines.append(f"- 樣本環境：{sample_note}")
         lines.extend(base_rate_lines)
 
     if facts.anchors:

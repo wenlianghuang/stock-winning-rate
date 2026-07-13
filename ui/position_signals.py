@@ -339,8 +339,15 @@ def _action_for_scenario(scenario_id: str, position_bias: str) -> str:
 def build_scenario_plan(
     position_facts: PositionFacts,
     chip_facts,
+    base_rates: dict | None = None,
 ) -> ScenarioPlan:
-    """Deterministic 3-scenario weights (sum 100%) from chip + position signals."""
+    """Deterministic 3-scenario weights (sum 100%) from chip + position signals.
+
+    When ``base_rates`` is provided, the aggregate historical forward edge of the
+    stock's current regimes nudges 續抱/反彈 vs 調節 weights so the realized
+    hit-rates actually move the numbers (not just the prompt). Callers that omit
+    ``base_rates`` (e.g. unit tests) get the pure chip/position weighting.
+    """
     scores = {"continuation": 34, "range": 33, "rebound": 33}
 
     chip_regime = getattr(chip_facts, "chip_regime", "unknown")
@@ -483,6 +490,29 @@ def build_scenario_plan(
             scores["range"] += 4
             scores["rebound"] -= 2
 
+    if base_rates:
+        from chip_signals import BASE_RATE_TILT_BAND, base_rate_forward_edge
+
+        edge = base_rate_forward_edge(chip_facts, base_rates)
+        # 中性帶內（噪音級）不動權重，與命中率表的傾向標籤一致
+        if edge is not None and abs(edge) >= BASE_RATE_TILT_BAND:
+            # 1% 相對基準超額 → 4 分傾斜，上限 ±8（與中量級 chip 因子相當）
+            shift = max(-8, min(8, round(edge * 4)))
+            # base rate 來自單一市場環境（多為牛市輪動）的條件機率，與技術結構
+            # 衝突時讓技術/動能主導：偏多傾向套在空頭結構、偏空傾向套在多頭結構
+            # 時砍半，避免命中率蓋過明確的趨勢判讀。
+            ma_stack = getattr(chip_facts, "ma_stack", "unknown")
+            if shift > 0 and (ma_stack == "bearish_stack" or bias == "defensive"):
+                shift //= 2
+            elif shift < 0 and ma_stack == "bullish_stack":
+                shift = -(-shift // 2)
+            if shift > 0:
+                scores["rebound"] += shift
+                scores["continuation"] -= shift
+            elif shift < 0:
+                scores["continuation"] += -shift
+                scores["rebound"] -= -shift
+
     weights = _normalize_weights(scores)
     primary_id = max(weights, key=weights.get)
     bias_key = position_facts.position_bias
@@ -510,6 +540,7 @@ def build_position_facts(
     avg_cost: float,
     shares: int,
     chip_facts=None,
+    base_rates: dict | None = None,
 ) -> PositionFacts:
     close_price = _to_float(row.get("收盤價"))
     ma20 = _to_float(row.get("MA20"))
@@ -562,7 +593,7 @@ def build_position_facts(
         required_action_hint=_required_action_hint(bucket),
     )
     if chip_facts is not None:
-        facts.scenario_plan = build_scenario_plan(facts, chip_facts)
+        facts.scenario_plan = build_scenario_plan(facts, chip_facts, base_rates)
     facts.anchors = _build_anchors(facts)
     return facts
 

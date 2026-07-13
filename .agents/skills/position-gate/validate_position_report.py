@@ -99,6 +99,7 @@ def _fact_issues(body: str, facts) -> list[ValidationIssue]:
 def _build_position_facts(
     row: dict[str, str], holding: HoldingRecord, chip_facts=None
 ):
+    from chip_signals import load_base_rates
     from position_signals import build_position_facts
 
     return build_position_facts(
@@ -108,6 +109,7 @@ def _build_position_facts(
         avg_cost=holding.avg_cost,
         shares=holding.shares,
         chip_facts=chip_facts,
+        base_rates=load_base_rates(),
     )
 
 

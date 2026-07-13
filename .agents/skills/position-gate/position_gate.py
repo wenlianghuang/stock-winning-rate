@@ -111,6 +111,7 @@ def _load_position_facts(
 ):
     """Compute deterministic position facts (pnl bucket, cost vs MA20, bias)."""
     _ensure_import_paths()
+    from chip_signals import load_base_rates
     from position_signals import (
         build_position_facts,
         position_facts_summary_for_prompt,
@@ -124,6 +125,7 @@ def _load_position_facts(
         avg_cost=holding.avg_cost,
         shares=holding.shares,
         chip_facts=chip_facts,
+        base_rates=load_base_rates(),
     )
     facts_path = csv_path.with_name(f"{csv_path.stem}.position.facts.json")
     try:

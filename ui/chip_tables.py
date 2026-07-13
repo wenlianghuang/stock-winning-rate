@@ -309,7 +309,7 @@ def build_history_table_markdown(history_rows: list[dict[str, str]]) -> str | No
                 [
                     "日期",
                     "收盤",
-                    "漲跌%",
+                    "漲跌(元)",
                     "成交量",
                     "外資",
                     "投信",
@@ -368,7 +368,25 @@ def build_chip_tables_markdown(
     if history_md:
         sections.extend(["", history_md])
 
+    base_rate_md = _build_base_rate_markdown(row, history_rows or [])
+    if base_rate_md:
+        sections.extend(["", base_rate_md])
+
     return "\n".join(sections).strip() + "\n"
+
+
+def _build_base_rate_markdown(
+    row: dict[str, str],
+    history_rows: list[dict[str, str]],
+) -> str | None:
+    """Deterministic regime hit-rate table (best-effort; skipped on any error)."""
+    try:
+        from chip_signals import build_base_rate_table_markdown, build_chip_facts
+
+        facts = build_chip_facts(row, history_rows)
+        return build_base_rate_table_markdown(facts)
+    except Exception:  # 附加區塊，任何失敗都不應影響主報告
+        return None
 
 
 def merge_report_body(csv_path: Path, agy_body: str) -> str:
