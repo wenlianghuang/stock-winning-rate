@@ -1,0 +1,40 @@
+{
+  "_comment": "新手投資組合候選池。ETF 為新手核心（beginner_core），大型權值股為衛星部位。sector 用於選股時的產業分散（每個 sector 至多挑 1 檔非 ETF）。defensive=true 表低波動防禦型（電信/金融/食品），供保守型加分。此檔為純設定，實際資料仍需 tw-stock-report 抓取對應 CSV。",
+  "candidates": [
+    {"id": "0050", "name": "元大台灣50", "asset_class": "etf", "category": "broad_etf", "sector": "etf_broad", "beginner_core": true, "defensive": false},
+    {"id": "006208", "name": "富邦台50", "asset_class": "etf", "category": "broad_etf", "sector": "etf_broad", "beginner_core": true, "defensive": false},
+    {"id": "0056", "name": "元大高股息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "beginner_core": true, "defensive": true},
+    {"id": "00878", "name": "國泰永續高股息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "beginner_core": true, "defensive": true},
+
+    {"id": "2330", "name": "台積電", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+    {"id": "2454", "name": "聯發科", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+    {"id": "2303", "name": "聯電", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+    {"id": "2379", "name": "瑞昱", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+    {"id": "3034", "name": "聯詠", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+    {"id": "3711", "name": "日月光投控", "asset_class": "stock", "category": "blue_chip", "sector": "semiconductor", "defensive": false},
+
+    {"id": "2317", "name": "鴻海", "asset_class": "stock", "category": "blue_chip", "sector": "electronics_manufacturing", "defensive": false},
+    {"id": "2382", "name": "廣達", "asset_class": "stock", "category": "blue_chip", "sector": "computer_hardware", "defensive": false},
+    {"id": "2357", "name": "華碩", "asset_class": "stock", "category": "blue_chip", "sector": "computer_hardware", "defensive": false},
+    {"id": "2308", "name": "台達電", "asset_class": "stock", "category": "blue_chip", "sector": "electronic_components", "defensive": false},
+    {"id": "3008", "name": "大立光", "asset_class": "stock", "category": "blue_chip", "sector": "optics", "defensive": false},
+    {"id": "2368", "name": "金像電", "asset_class": "stock", "category": "blue_chip", "sector": "pcb", "defensive": false},
+    {"id": "3037", "name": "欣興", "asset_class": "stock", "category": "blue_chip", "sector": "pcb", "defensive": false},
+    {"id": "2409", "name": "友達", "asset_class": "stock", "category": "blue_chip", "sector": "panel", "defensive": false},
+    {"id": "3305", "name": "昇達科", "asset_class": "stock", "category": "blue_chip", "sector": "network_equipment", "defensive": false},
+    {"id": "3714", "name": "富采", "asset_class": "stock", "category": "blue_chip", "sector": "optoelectronics", "defensive": false},
+
+    {"id": "2881", "name": "富邦金", "asset_class": "stock", "category": "blue_chip", "sector": "financials", "defensive": true},
+    {"id": "2882", "name": "國泰金", "asset_class": "stock", "category": "blue_chip", "sector": "financials", "defensive": true},
+    {"id": "2886", "name": "兆豐金", "asset_class": "stock", "category": "blue_chip", "sector": "financials", "defensive": true},
+    {"id": "2891", "name": "中信金", "asset_class": "stock", "category": "blue_chip", "sector": "financials", "defensive": true},
+
+    {"id": "2412", "name": "中華電", "asset_class": "stock", "category": "blue_chip", "sector": "telecom", "defensive": true},
+    {"id": "1216", "name": "統一", "asset_class": "stock", "category": "blue_chip", "sector": "food", "defensive": true},
+    {"id": "1301", "name": "台塑", "asset_class": "stock", "category": "blue_chip", "sector": "plastics", "defensive": true},
+    {"id": "2002", "name": "中鋼", "asset_class": "stock", "category": "blue_chip", "sector": "steel", "defensive": true},
+
+    {"id": "2603", "name": "長榮", "asset_class": "stock", "category": "blue_chip", "sector": "shipping", "defensive": false},
+    {"id": "2609", "name": "陽明", "asset_class": "stock", "category": "blue_chip", "sector": "shipping", "defensive": false}
+  ]
+}

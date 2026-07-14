@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -29,6 +30,13 @@ except ImportError as exc:
     raise SystemExit(10) from exc
 
 ROOT = Path(__file__).resolve().parent.parent
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ModuleNotFoundError:
+    pass
 STOCK_SKILL_DIR = ROOT / ".agents" / "skills" / "tw-stock-report"
 if str(STOCK_SKILL_DIR) not in sys.path:
     sys.path.insert(0, str(STOCK_SKILL_DIR))
@@ -36,6 +44,11 @@ STOCK_SCRIPT = STOCK_SKILL_DIR / "fetch_chip_report.py"
 GATE_SCRIPT = ROOT / ".agents" / "skills" / "report-gate" / "report_gate.py"
 POSITION_SCRIPT = ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py"
 STOCK_ROOT = ROOT / "reports" / "stock"
+PORTFOLIO_ROOT = ROOT / "reports" / "portfolio"
+PORTFOLIO_SKILL_DIR = ROOT / ".agents" / "skills" / "portfolio-gate"
+PORTFOLIO_GATE_SCRIPT = PORTFOLIO_SKILL_DIR / "portfolio_gate.py"
+PORTFOLIO_PROFILES = ("conservative", "balanced", "aggressive")
+PORTFOLIO_MIN_AMOUNT = 50_000
 WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
 
@@ -93,6 +106,37 @@ def _update_job(job: Job, **changes: Any) -> None:
 _jobs: dict[str, Job] = {}
 _jobs_lock = threading.Lock()
 
+_portfolio_jobs: dict[str, "PortfolioJob"] = {}
+_portfolio_jobs_lock = threading.Lock()
+
+
+@dataclass
+class PortfolioJob:
+    id: str
+    profile: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    amount: int | None = None
+    requested_trade_date: str | None = None
+    trade_date: str | None = None
+    error: str | None = None
+    portfolio: dict[str, Any] | None = None
+    skip_pdf: bool = True
+    mode: str = "beginner"
+    themes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        return data
+
+
+def _update_portfolio_job(job: PortfolioJob, **changes: Any) -> None:
+    for key, value in changes.items():
+        setattr(job, key, value)
+    job.updated_at = _now_iso()
+
 
 class CreateJobRequest(BaseModel):
     stock_id: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
@@ -118,6 +162,23 @@ class DigestItem(BaseModel):
 class CreateDigestRequest(BaseModel):
     digest_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     items: list[DigestItem] = Field(..., min_length=1)
+
+
+class CreatePortfolioJobRequest(BaseModel):
+    mode: str = Field(default="beginner", pattern=r"^(beginner|theme)$")
+    profile: str | None = Field(
+        default=None,
+        pattern=r"^(conservative|balanced|aggressive)$",
+        description="新手模式必填；主題模式可省略",
+    )
+    themes: list[str] | None = Field(
+        default=None,
+        description="主題模式必填，例如 ['financials'] 或 ['financials','thermal']",
+    )
+    amount: int = Field(..., ge=PORTFOLIO_MIN_AMOUNT)
+    trade_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    skip_pdf: bool = True
+    force: bool = False
 
 
 def _run_script(script: Path, args: list[str]) -> int:
@@ -480,12 +541,180 @@ def _run_pipeline(job_id: str) -> None:
             _update_job(job, status=JobStatus.FAILED, error=str(exc))
 
 
+def _ensure_portfolio_paths() -> None:
+    _ensure_import_paths()
+    text = str(PORTFOLIO_SKILL_DIR)
+    if text not in sys.path:
+        sys.path.insert(0, text)
+
+
+def _load_portfolio_narrative(profile: str, trade_date: str) -> tuple[str | None, str]:
+    """Prefer the standalone agy narrative; fall back to splitting the gate .md."""
+    out_dir = PORTFOLIO_ROOT / trade_date
+    narrative_path = out_dir / f"portfolio_{profile}.narrative.md"
+    if narrative_path.exists():
+        text = narrative_path.read_text(encoding="utf-8").strip()
+        if text:
+            return text, "agy"
+
+    md_path = out_dir / f"portfolio_{profile}.md"
+    if md_path.exists():
+        raw = md_path.read_text(encoding="utf-8")
+        if "## 報告資訊" in raw:  # gate-authored report: header --- tables --- narrative
+            parts = [part.strip() for part in raw.split("\n---\n")]
+            if len(parts) >= 3 and parts[-1]:
+                return parts[-1], "agy"
+    return None, "rules"
+
+
+def _parse_theme_query(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip().lower() for part in raw.replace(";", ",").split(",") if part.strip()]
+
+
+def _build_portfolio_payload(
+    profile: str | None,
+    amount: int | None,
+    date: str | None,
+    *,
+    mode: str = "beginner",
+    themes: list[str] | None = None,
+) -> dict[str, Any]:
+    _ensure_portfolio_paths()
+    from chip_signals import load_base_rates
+    from portfolio_data import (
+        DEFAULT_THEME_UNIVERSE,
+        DEFAULT_UNIVERSE,
+        build_candidates,
+        resolve_trade_date,
+    )
+    from portfolio_signals import (
+        build_portfolio_facts,
+        build_theme_portfolio_facts,
+        load_theme_catalog,
+        sector_label,
+        theme_slug,
+    )
+
+    trade_date = resolve_trade_date(date)
+    if not trade_date:
+        raise RuntimeError("找不到可用交易日，請先在『台股籌碼報告』產生當日個股資料。")
+
+    if mode == "theme":
+        theme_list = [t.strip().lower() for t in (themes or []) if str(t).strip()]
+        if not theme_list:
+            raise RuntimeError("主題模式須指定 themes（例如 financials 或 financials,thermal）")
+        universe_path = DEFAULT_THEME_UNIVERSE
+        candidates = build_candidates(trade_date, universe_path)
+        if not any(getattr(c, "data_available", False) for c in candidates):
+            raise RuntimeError(
+                f"{trade_date} 尚無主題候選股資料，請先於『台股籌碼報告』抓取主題池個股。"
+            )
+        catalog = load_theme_catalog(universe_path)
+        facts = build_theme_portfolio_facts(
+            candidates,
+            themes=theme_list,
+            base_rates=load_base_rates(),
+            amount_twd=amount,
+            trade_date=trade_date,
+            theme_catalog=catalog,
+        )
+        artifact_key = theme_slug(theme_list)
+    else:
+        if profile not in PORTFOLIO_PROFILES:
+            raise RuntimeError("profile 須為 conservative / balanced / aggressive")
+        candidates = build_candidates(trade_date, DEFAULT_UNIVERSE)
+        if not any(getattr(c, "data_available", False) for c in candidates):
+            raise RuntimeError(
+                f"{trade_date} 尚無候選股資料，請先於『台股籌碼報告』抓取個股，或改用有資料的日期。"
+            )
+        facts = build_portfolio_facts(
+            candidates,
+            profile=profile,
+            base_rates=load_base_rates(),
+            amount_twd=amount,
+            trade_date=trade_date,
+        )
+        artifact_key = profile
+
+    data = asdict(facts)
+    for holding in data.get("holdings", []):
+        holding["sector_label"] = sector_label(str(holding.get("sector", "")))
+    data["top_sector_label"] = sector_label(str(data.get("top_sector", "")))
+
+    narrative, via = _load_portfolio_narrative(artifact_key, trade_date)
+    return {
+        "facts": data,
+        "narrative": narrative,
+        "has_narrative": narrative is not None,
+        "generated_via": via,
+        "artifact_key": artifact_key,
+    }
+
+
 def _get_job_or_404(job_id: str) -> Job:
     with _jobs_lock:
         job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="找不到 job")
     return job
+
+
+def _get_portfolio_job_or_404(job_id: str) -> PortfolioJob:
+    with _portfolio_jobs_lock:
+        job = _portfolio_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="找不到 portfolio job")
+    return job
+
+
+def _run_portfolio_pipeline(job_id: str) -> None:
+    with _portfolio_jobs_lock:
+        job = _portfolio_jobs.get(job_id)
+        if job is None:
+            return
+
+    try:
+        with _portfolio_jobs_lock:
+            _update_portfolio_job(job, status=JobStatus.GATING, error=None)
+
+        gate_args: list[str] = ["--mode", job.mode]
+        if job.mode == "theme":
+            gate_args.extend(["--themes", ",".join(job.themes)])
+        else:
+            gate_args.insert(0, job.profile)
+        if job.skip_pdf:
+            gate_args.append("--skip-pdf")
+        if job.amount is not None:
+            gate_args.extend(["--amount", str(job.amount)])
+        trade_date = job.trade_date or job.requested_trade_date
+        if trade_date:
+            gate_args.extend(["--date", trade_date])
+
+        _run_script(PORTFOLIO_GATE_SCRIPT, gate_args)
+
+        payload = _build_portfolio_payload(
+            job.profile if job.mode == "beginner" else None,
+            job.amount,
+            trade_date,
+            mode=job.mode,
+            themes=job.themes if job.mode == "theme" else None,
+        )
+        if not payload.get("has_narrative"):
+            raise RuntimeError("portfolio-gate 已結束，但仍找不到白話說明檔案")
+
+        with _portfolio_jobs_lock:
+            _update_portfolio_job(
+                job,
+                status=JobStatus.DONE,
+                portfolio=payload,
+                trade_date=str(payload.get("facts", {}).get("trade_date") or trade_date),
+                error=None,
+            )
+    except Exception as exc:
+        with _portfolio_jobs_lock:
+            _update_portfolio_job(job, status=JobStatus.FAILED, error=str(exc))
 
 
 def create_app() -> FastAPI:
@@ -551,6 +780,125 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=502, detail=f"Digest JSON 解析失敗：{exc}") from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/portfolio/themes")
+    def list_portfolio_themes() -> dict[str, Any]:
+        _ensure_portfolio_paths()
+        from portfolio_data import DEFAULT_THEME_UNIVERSE
+        from portfolio_signals import load_theme_catalog
+
+        catalog = load_theme_catalog(DEFAULT_THEME_UNIVERSE)
+        themes = [
+            {"id": tid, **meta}
+            for tid, meta in sorted(catalog.items())
+        ]
+        return {"themes": themes}
+
+    @app.get("/portfolio")
+    def get_portfolio(
+        profile: str | None = None,
+        amount: int | None = None,
+        date: str | None = None,
+        mode: str = "beginner",
+        themes: str | None = None,
+    ) -> dict[str, Any]:
+        if mode not in ("beginner", "theme"):
+            raise HTTPException(status_code=400, detail="mode 須為 beginner 或 theme")
+        if amount is not None and amount < PORTFOLIO_MIN_AMOUNT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"amount 須 ≥ {PORTFOLIO_MIN_AMOUNT}",
+            )
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+        theme_list = _parse_theme_query(themes)
+        if mode == "beginner":
+            if not profile or profile not in PORTFOLIO_PROFILES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="新手模式 profile 須為 conservative / balanced / aggressive",
+                )
+        elif not theme_list:
+            raise HTTPException(
+                status_code=400,
+                detail="主題模式須指定 themes（例如 financials 或 financials,thermal）",
+            )
+        try:
+            payload = _build_portfolio_payload(
+                profile,
+                amount,
+                date,
+                mode=mode,
+                themes=theme_list or None,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"組合產生失敗：{exc}") from exc
+        return {"portfolio": payload}
+
+    @app.post("/portfolio/jobs")
+    def create_portfolio_job(body: CreatePortfolioJobRequest) -> dict[str, Any]:
+        mode = body.mode or "beginner"
+        theme_list = [t.strip().lower() for t in (body.themes or []) if str(t).strip()]
+        if mode == "beginner":
+            if not body.profile or body.profile not in PORTFOLIO_PROFILES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="新手模式 profile 須為 conservative / balanced / aggressive",
+                )
+        elif not theme_list:
+            raise HTTPException(
+                status_code=400,
+                detail="主題模式須指定 themes（例如 ['financials']）",
+            )
+
+        try:
+            payload = _build_portfolio_payload(
+                body.profile,
+                body.amount,
+                body.trade_date,
+                mode=mode,
+                themes=theme_list or None,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"組合產生失敗：{exc}") from exc
+
+        trade_date = str(payload.get("facts", {}).get("trade_date") or body.trade_date or "")
+        artifact_key = str(payload.get("artifact_key") or body.profile or "theme")
+        job_id = uuid.uuid4().hex
+        has_narrative = bool(payload.get("has_narrative")) and not body.force
+        job = PortfolioJob(
+            id=job_id,
+            profile=artifact_key,
+            amount=body.amount,
+            requested_trade_date=body.trade_date,
+            trade_date=trade_date or None,
+            portfolio=payload,
+            skip_pdf=body.skip_pdf,
+            status=JobStatus.DONE if has_narrative else JobStatus.GATING,
+            mode=mode,
+            themes=theme_list,
+        )
+        with _portfolio_jobs_lock:
+            _portfolio_jobs[job_id] = job
+
+        if not has_narrative:
+            thread = threading.Thread(
+                target=_run_portfolio_pipeline,
+                args=(job_id,),
+                daemon=True,
+            )
+            thread.start()
+
+        return {"job": job.to_dict()}
+
+    @app.get("/portfolio/jobs/{job_id}")
+    def get_portfolio_job(job_id: str) -> dict[str, Any]:
+        job = _get_portfolio_job_or_404(job_id)
+        return {"job": job.to_dict()}
 
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:

@@ -421,6 +421,23 @@ def _strip_tables(text: str) -> str:
     )
 
 
+# 中性/否定的均線排列描述本身含「多頭排列」「空頭排列」子字串（例：系統 anchor
+#「均線糾結（未形成明確多/空頭排列）」），語意上代表「未形成」多空排列，與 short_pullback /
+# short_rebound / 均線糾結完全相容，須在多空排列比對前遮蔽，避免 naive 子字串比對誤判。
+NEUTRAL_ALIGNMENT_PHRASES = (
+    "未形成明確多/空頭排列",
+    "多/空頭排列",
+    "多空排列未明",
+    "多空未明",
+)
+
+
+def _mask_neutral_alignment(text: str) -> str:
+    for phrase in NEUTRAL_ALIGNMENT_PHRASES:
+        text = text.replace(phrase, "")
+    return text
+
+
 def _current_state_region(text: str) -> str:
     """Return the portion describing the *current* state (before scenarios)."""
     cut = len(text)
@@ -616,7 +633,7 @@ def run_fact_checks(
 
     ma_alignment = getattr(facts, "ma_alignment", "unknown")
     if ma_alignment in {"bullish", "bearish", "short_rebound", "short_pullback"}:
-        stripped = _strip_tables(text)
+        stripped = _mask_neutral_alignment(_strip_tables(text))
         if ma_alignment == "bullish":
             bull = _contains_any(stripped, MA_ALIGN_BULLISH_PHRASES)
             bear = _contains_any(stripped, MA_ALIGN_BEARISH_PHRASES)
@@ -701,7 +718,7 @@ def run_fact_checks(
 
     ma_stack = getattr(facts, "ma_stack", "unknown")
     if ma_stack in {"bullish_stack", "bearish_stack"}:
-        stripped = _strip_tables(text)
+        stripped = _mask_neutral_alignment(_strip_tables(text))
         bull = _contains_any(stripped, MA_STACK_BULLISH_PHRASES)
         bear = _contains_any(stripped, MA_STACK_BEARISH_PHRASES)
         if ma_stack == "bullish_stack" and bear and not bull:

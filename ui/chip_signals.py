@@ -112,7 +112,7 @@ MA_MID_ALIGN_LABEL = {
 MA_STACK_LABEL = {
     "bullish_stack": "均線多頭排列（MA5 > MA10 > MA20）",
     "bearish_stack": "均線空頭排列（MA5 < MA10 < MA20）",
-    "mixed": "均線糾結（未形成明確多/空頭排列）",
+    "mixed": "均線糾結（多空排列未明）",
     "unknown": "均線排列資料不足",
 }
 

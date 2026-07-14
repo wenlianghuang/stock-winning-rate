@@ -11,3 +11,6 @@ wheels/
 
 # Generated reports
 reports/
+
+# Secrets / local env
+.env

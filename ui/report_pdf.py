@@ -422,6 +422,51 @@ def _write_report_pdf(
     return True
 
 
+def write_portfolio_pdf(
+    pdf_path: Path,
+    *,
+    title: str,
+    subtitle: str,
+    body: str,
+    meta: ReportMeta,
+) -> bool:
+    """Render a beginner-portfolio report to PDF. Returns False when unavailable."""
+    font_info = _find_cjk_font()
+    if not font_info:
+        return False
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        return False
+
+    font_path, collection_index = font_info
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(15, 15, 15)
+    pdf.add_page()
+    pdf.add_font("CJK", "", str(font_path), collection_font_number=collection_index)
+    pdf.set_font("CJK", size=12)
+
+    _pdf_write_line(pdf, title, line_height=8)
+    pdf.ln(1)
+    pdf.set_font("CJK", size=10)
+    if subtitle:
+        _pdf_write_line(pdf, sanitize_pdf_text(subtitle), line_height=6)
+    for line in format_report_metadata(meta).splitlines():
+        _pdf_write_line(
+            pdf,
+            plain_text_line(line) or line.lstrip("- ").replace("**", ""),
+            line_height=6,
+        )
+    pdf.ln(2)
+    pdf.set_font("CJK", size=11)
+
+    _render_markdown_body_to_pdf(pdf, body.strip())
+    pdf.output(str(pdf_path))
+    return True
+
+
 def write_summary_artifacts(
     csv_path: Path,
     body: str,

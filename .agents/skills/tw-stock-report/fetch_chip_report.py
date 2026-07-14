@@ -17,6 +17,13 @@ import requests
 
 from twse_calendar import resolve_lookback_dates, resolve_trade_date
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+except ModuleNotFoundError:
+    pass
+
 FINMIND_DATA_URL = "https://api.finmindtrade.com/api/v4/data"
 YAHOO_BROKER_URL = "https://tw.stock.yahoo.com/quote/{symbol}.TW/broker-trading"
 YAHOO_BROKER_API = (

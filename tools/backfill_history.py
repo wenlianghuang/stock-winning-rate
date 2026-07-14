@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 import time
@@ -30,6 +31,14 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ModuleNotFoundError:
+    pass
+
 SKILL_DIR = PROJECT_ROOT / ".agents" / "skills" / "tw-stock-report"
 if str(SKILL_DIR) not in sys.path:
     sys.path.insert(0, str(SKILL_DIR))
@@ -58,14 +67,67 @@ from fetch_chip_report import (  # noqa: E402
     _trailing_highs_lows_from_dataset,
     _trailing_volumes_from_dataset,
 )
-from twse_calendar import fetch_trading_dates, resolve_lookback_dates  # noqa: E402
+from twse_calendar import (  # noqa: E402
+    fetch_trading_dates,
+    resolve_lookback_dates,
+    resolve_trade_date,
+)
 
-DEFAULT_STOCKS = [
+DEFAULT_START_LOOKBACK_DAYS = 60
+
+PORTFOLIO_GATE_DIR = PROJECT_ROOT / ".agents" / "skills" / "portfolio-gate"
+BEGINNER_UNIVERSE = PORTFOLIO_GATE_DIR / "portfolio_universe.json"
+THEME_UNIVERSE = PORTFOLIO_GATE_DIR / "portfolio_theme_universe.json"
+
+# 若 universe JSON 讀不到時的後備清單（與既有新手池對齊）。
+FALLBACK_STOCKS = [
     "1216", "1301", "2002", "2303", "2308", "2317", "2330", "2357",
     "2368", "2379", "2382", "2409", "2412", "2454", "2603", "2609",
     "2881", "2882", "2886", "2891", "3008", "3034", "3037", "3305",
-    "3711", "3714",
+    "3711", "3714", "0050", "006208", "0056", "00878",
 ]
+
+
+def _ids_from_universe(path: Path) -> list[str]:
+    """Read candidate stock ids from a portfolio universe JSON."""
+    if not path.exists():
+        return []
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    candidates = raw.get("candidates") if isinstance(raw, dict) else raw
+    if not isinstance(candidates, list):
+        return []
+    ids: list[str] = []
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            continue
+        sid = str(entry.get("id", "")).strip()
+        if sid:
+            ids.append(sid)
+    return ids
+
+
+def load_default_stock_ids(
+    *,
+    beginner_path: Path = BEGINNER_UNIVERSE,
+    theme_path: Path = THEME_UNIVERSE,
+) -> list[str]:
+    """Merge beginner + theme universe ids (deduped, beginner order first).
+
+    Keeps ``uv run --extra stock python tools/backfill_history.py`` covering
+    both novice ETF/blue-chip sleeves and theme sleeves without ``--stocks``.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for sid in _ids_from_universe(beginner_path) + _ids_from_universe(theme_path):
+        if sid in seen:
+            continue
+        seen.add(sid)
+        out.append(sid)
+    return out or list(FALLBACK_STOCKS)
+
+
+# 啟動時組好，方便 import / 測試；檔案更新後重跑 CLI 即可。
+DEFAULT_STOCKS = load_default_stock_ids()
 
 
 def target_trading_dates(start: str, end: str) -> list[str]:
@@ -197,10 +259,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stocks",
-        help="股票代碼，逗號分隔；未指定則使用內建分散清單",
+        help=(
+            "股票代碼，逗號分隔；未指定則合併 "
+            "portfolio_universe.json + portfolio_theme_universe.json"
+        ),
     )
-    parser.add_argument("--start", required=True, help="回補起始交易日 YYYY-MM-DD")
-    parser.add_argument("--end", required=True, help="回補結束交易日 YYYY-MM-DD")
+    parser.add_argument(
+        "--start",
+        help=(
+            "回補起始交易日 YYYY-MM-DD"
+            f"（預設：--end 往前第 {DEFAULT_START_LOOKBACK_DAYS} 個交易日）"
+        ),
+    )
+    parser.add_argument(
+        "--end",
+        help="回補結束交易日 YYYY-MM-DD（預設：台北今天對應的最新交易日）",
+    )
     parser.add_argument(
         "--lookback-days",
         type=int,
@@ -234,15 +308,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    stock_ids = (
-        [s.strip() for s in args.stocks.split(",") if s.strip()]
-        if args.stocks
-        else DEFAULT_STOCKS
-    )
+    if args.stocks:
+        stock_ids = [s.strip() for s in args.stocks.split(",") if s.strip()]
+    else:
+        # 每次執行重讀 universe，避免改 JSON 後還要重 import
+        stock_ids = load_default_stock_ids()
+        print(
+            f"未指定 --stocks：自新手+主題候選池載入 {len(stock_ids)} 檔",
+            file=sys.stderr,
+        )
+
+    end = args.end
+    if not end:
+        end, note = resolve_trade_date(validate_market=False)
+        if note:
+            print(f"end 預設：{note}", file=sys.stderr)
+
+    start = args.start
+    if not start:
+        # 「end 往前第 N 個交易日」當起點：含 end 共 N+1 個交易日
+        window = resolve_lookback_dates(end, DEFAULT_START_LOOKBACK_DAYS + 1)
+        start = window[0]
+
+    print(f"回補區間：{start} ~ {end}", file=sys.stderr)
+
     backfill(
         stock_ids,
-        args.start,
-        args.end,
+        start,
+        end,
         skip_major=not args.with_major,
         lookback_days=max(1, args.lookback_days),
         chart_lookback_days=max(MA20_PERIOD, args.chart_lookback_days),
