@@ -11,7 +11,8 @@ POSITION_ANALYSIS_FORMAT_RULES = """
 - 分析須同時參考：**當日快照 CSV**、**歷史 CSV**、**區間摘要欄位**、**系統提供的部位資料**
 
 ## 一、部位現況
-**純文字** 2～4 句：說明均價、股數、未實現損益%、現價相對均價與 MA20（月線）的意義（數字由系統表格提供，正文勿重複列表）。
+**純文字** 2～4 句：說明均價、股數、未實現損益%、現價相對均價與 MA20（月線）的意義（數字由系統表格提供，正文勿重複列表）；
+若系統標示**使用融資**，須點出融資屬性與槓桿風險意識。
 
 ## 二、市場面摘要
 **純文字** 3～5 句：綜合當日與近 N 日籌碼趨勢（延續/轉折/背離）與新聞方向；
@@ -44,7 +45,8 @@ POSITION_ANALYSIS_FORMAT_RULES = """
 不可寫保證漲跌、目標價或「一定買/賣」。
 
 ## 五、風險與紀律提醒
-**純文字** 編號清單（2～4 項）：部位過大、沉沒成本、停損紀律、與大盤連動等；**不要用表格**。
+**純文字** 編號清單（2～4 項）：部位過大、沉沒成本、停損紀律、與大盤連動等；
+若系統標示**使用融資**，須至少一項談追繳／斷頭／維持率或融資減碼；**不要用表格**。
 
 ## 六、免責聲明
 一句話免責（非投資建議）。
@@ -57,6 +59,7 @@ class HoldingInfo:
     avg_cost: float
     shares: int
     note: str = ""
+    uses_margin: bool = False
 
 
 def build_position_analysis_prompt_suffix(
@@ -86,9 +89,11 @@ def build_position_analysis_prompt_suffix(
         if market_report_path
         else "市場觀察報告：尚無（請直接依 facts 與新聞撰寫市場面摘要）。\n"
     )
+    margin_note = "是（融資部位）" if holding.uses_margin else "否（現股）"
     holding_note = (
         f"持股均價：{holding.avg_cost} 元/股\n"
         f"持股股數：{holding.shares:,} 股\n"
+        f"是否使用融資：{margin_note}\n"
         f"{price_note}\n"
         f"{pnl_note}\n"
     )
@@ -98,6 +103,18 @@ def build_position_analysis_prompt_suffix(
     position_state_block = (
         f"{position_facts_summary}\n\n" if position_facts_summary else ""
     )
+
+    margin_rules = ""
+    if holding.uses_margin:
+        margin_rules = (
+            "- 此部位標示為**融資**：部位現況須點出融資屬性；"
+            "操作情境與風險提醒須談追繳／斷頭／維持率或融資減碼防禦，"
+            "且不宜在無前提時建議攤平\n"
+        )
+    else:
+        margin_rules = (
+            "- 此部位為現股：勿虛構融資追繳／斷頭情境\n"
+        )
 
     return (
         f"這是「單檔持股部位決策」任務：{stock_name}（{stock_id}）。\n"
@@ -119,6 +136,7 @@ def build_position_analysis_prompt_suffix(
         "- 市場面分析須客觀，勿因套牢或獲利而扭曲籌碼解讀\n"
         "- 操作情境須對齊系統試算的部位狀態（損益分類）與**情境權重（百分比勿改）**\n"
         "- 若系統提供停損/停利參考價（近20日低/高），操作情境須明確引用\n"
+        f"{margin_rules}"
         "- 新聞只能引用上方內容，不可臆造\n"
         "- 完整正文印在 stdout，不要只寫入檔案\n"
         "- 不要加「工作摘要」或工具操作說明\n"

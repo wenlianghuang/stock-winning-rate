@@ -86,6 +86,7 @@ class Job:
     is_holding: bool = False
     share_count: int | None = None
     avg_cost: float | None = None
+    uses_margin: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -149,6 +150,7 @@ class CreateJobRequest(BaseModel):
     is_holding: bool = False
     share_count: int | None = Field(default=None, gt=0)
     avg_cost: float | None = Field(default=None, gt=0)
+    uses_margin: bool = False
 
 
 class DigestItem(BaseModel):
@@ -545,6 +547,8 @@ def _run_pipeline(job_id: str) -> None:
                 str(job.avg_cost),
                 str(job.share_count),
             ]
+            if job.uses_margin:
+                position_args.append("--margin")
             if job.skip_pdf:
                 position_args.append("--skip-pdf")
             if trade_date:
@@ -990,6 +994,7 @@ def create_app() -> FastAPI:
             is_holding=body.is_holding,
             share_count=body.share_count,
             avg_cost=body.avg_cost,
+            uses_margin=bool(body.is_holding and body.uses_margin),
         )
         with _jobs_lock:
             _jobs[job_id] = job

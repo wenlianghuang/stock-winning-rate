@@ -61,6 +61,7 @@ def build_position_summary_markdown(
     rows: list[list[str]] = [
         ["持股均價（元）", _fmt_num(holding.avg_cost)],
         ["持股股數", _fmt_num(float(holding.shares))],
+        ["是否融資", "是" if holding.uses_margin else "否"],
         ["收盤價（元）", _fmt_num(close_price) if close_price is not None else "—"],
     ]
     if pnl_pct is not None:

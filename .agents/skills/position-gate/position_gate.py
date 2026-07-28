@@ -103,6 +103,7 @@ def _to_holding_info(record: HoldingRecord):
         avg_cost=record.avg_cost,
         shares=record.shares,
         note=record.note,
+        uses_margin=record.uses_margin,
     )
 
 
@@ -126,6 +127,7 @@ def _load_position_facts(
         shares=holding.shares,
         chip_facts=chip_facts,
         base_rates=load_base_rates(),
+        uses_margin=holding.uses_margin,
     )
     facts_path = csv_path.with_name(f"{csv_path.stem}.position.facts.json")
     try:
@@ -260,6 +262,7 @@ POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
     "position_profit_no_plan": "此部位小幅獲利，操作情境須談加碼條件/停利/續抱或獲利回吐風險",
     "position_breakeven_no_trigger": "此部位接近損益兩平，操作情境須給明確的出場或加碼觸發條件",
     "position_scenario_unanchored": "操作情境須錨定部位損益（獲利/虧損/成本/均價/套牢），勿泛泛而談",
+    "position_margin_no_risk": "此部位為融資，操作情境或風險提醒須談追繳／斷頭／維持率，或明確提出融資減碼／停損",
     "position_scenario_label_missing": "操作情境須列出系統給定的三種市場情境名稱（延續調節/橫盤整理/技術反彈）",
     "position_scenario_weight_missing": "操作情境須標示各情境的權重百分比（與系統一致，加總 100%）",
     "position_scenario_primary_unmarked": "操作情境須標示主線（最高權重情境 +「主線」）",
@@ -645,6 +648,7 @@ def run_gate(
                 "holding": {
                     "avg_cost": holding.avg_cost,
                     "shares": holding.shares,
+                    "uses_margin": holding.uses_margin,
                 },
                 **asdict(round_log),
             },
@@ -770,6 +774,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="持股備註（選填）",
     )
     parser.add_argument(
+        "--margin",
+        action="store_true",
+        help="標示此部位使用融資（影響風險敘事與 gate）",
+    )
+    parser.add_argument(
         "--from-holdings",
         action="store_true",
         help="強制從 holdings.json 讀取該股（忽略未傳的 CLI 均價/股數）",
@@ -885,6 +894,7 @@ def main(argv: list[str] | None = None) -> int:
             avg_cost=avg_cost,
             shares=shares,
             note=note,
+            uses_margin=bool(args.margin),
             from_holdings_file=args.from_holdings,
         )
     except ValueError as exc:
@@ -896,8 +906,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_VALIDATION_FAILED
 
     print(f"CSV: {csv_path.resolve()}", file=sys.stderr)
+    margin_label = "融資" if holding.uses_margin else "現股"
     print(
-        f"持股：均價 {holding.avg_cost} 元 × {holding.shares:,} 股",
+        f"持股：均價 {holding.avg_cost} 元 × {holding.shares:,} 股（{margin_label}）",
         file=sys.stderr,
     )
     return run_gate(

@@ -456,6 +456,7 @@ def build_position_summary(position_facts, body: str) -> dict[str, Any]:
         ),
         "avg_cost": position_facts.avg_cost,
         "shares": position_facts.shares,
+        "uses_margin": bool(getattr(position_facts, "uses_margin", False)),
         "scenario_plan": scenario_plan,
         "narrative": {
             "position_status": _paragraph_text(status_section) or None,

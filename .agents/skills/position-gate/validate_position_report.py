@@ -110,6 +110,7 @@ def _build_position_facts(
         shares=holding.shares,
         chip_facts=chip_facts,
         base_rates=load_base_rates(),
+        uses_margin=holding.uses_margin,
     )
 
 

@@ -15,6 +15,7 @@ class HoldingRecord:
     avg_cost: float
     shares: int
     note: str = ""
+    uses_margin: bool = False
 
 
 def _parse_share_count(entry: dict) -> int:
@@ -53,6 +54,7 @@ def load_holdings(path: Path | None = None) -> dict[str, HoldingRecord]:
             avg_cost=avg_cost,
             shares=shares,
             note=str(entry.get("note", "")).strip(),
+            uses_margin=bool(entry.get("uses_margin", False)),
         )
     return holdings
 
@@ -72,6 +74,7 @@ def make_holding_record(
     avg_cost: float,
     shares: int,
     note: str = "",
+    uses_margin: bool = False,
 ) -> HoldingRecord:
     if avg_cost <= 0:
         raise ValueError("均價須 > 0")
@@ -82,13 +85,14 @@ def make_holding_record(
         avg_cost=float(avg_cost),
         shares=int(shares),
         note=note.strip(),
+        uses_margin=bool(uses_margin),
     )
 
 
 HOLDING_USAGE_HINT = (
     "請提供持股均價與股數，例如：\n"
     "  position-gate 2409 32.5 500000\n"
-    "  position-gate 2409 --avg-cost 32.5 --shares 500000\n"
+    "  position-gate 2409 --avg-cost 32.5 --shares 500000 --margin\n"
     "  Chat：/position 2409 32.5 500000\n"
     "或加 --all-holdings 讀取 holdings.json 整批處理。"
 )
@@ -101,6 +105,7 @@ def resolve_holding(
     avg_cost: float | None = None,
     shares: int | None = None,
     note: str = "",
+    uses_margin: bool = False,
     from_holdings_file: bool = False,
 ) -> HoldingRecord:
     """Resolve holding from CLI args or holdings.json (--from-holdings / fallback)."""
@@ -112,6 +117,7 @@ def resolve_holding(
             avg_cost=avg_cost,
             shares=shares,
             note=note,
+            uses_margin=uses_margin,
         )
 
     path = holdings_path or DEFAULT_HOLDINGS

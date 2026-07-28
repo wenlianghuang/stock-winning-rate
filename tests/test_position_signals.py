@@ -49,7 +49,14 @@ def _row(close: str, ma20: str = "50", **overrides) -> dict[str, str]:
 
 
 
-def _facts(avg_cost: float, close: str, ma20: str = "50", **row_overrides):
+def _facts(
+    avg_cost: float,
+    close: str,
+    ma20: str = "50",
+    *,
+    uses_margin: bool = False,
+    **row_overrides,
+):
     row = _row(close, ma20, **row_overrides)
     chip = build_chip_facts(row)
     return build_position_facts(
@@ -59,6 +66,7 @@ def _facts(avg_cost: float, close: str, ma20: str = "50", **row_overrides):
         avg_cost=avg_cost,
         shares=500_000,
         chip_facts=chip,
+        uses_margin=uses_margin,
     )
 
 
@@ -228,6 +236,35 @@ class PositionCheckTests(unittest.TestCase):
         )
         self.assertEqual(f.pnl_bucket, "unknown")
         self.assertEqual(run_position_checks("任意內容", f), [])
+
+    def test_margin_flag_on_facts(self) -> None:
+        f = _facts(60.0, "50", uses_margin=True)
+        self.assertTrue(f.uses_margin)
+        self.assertIn("融資", f.required_action_hint)
+        self.assertTrue(any("融資" in a for a in f.anchors))
+
+    def test_margin_requires_risk_narrative(self) -> None:
+        f = _facts(60.0, "50", uses_margin=True)
+        body = _scenario_body(f)
+        codes = [c for c, _ in run_position_checks(body, f)]
+        self.assertIn("position_margin_no_risk", codes)
+
+    def test_margin_with_call_risk_passes(self) -> None:
+        f = _facts(60.0, "50", uses_margin=True)
+        body = (
+            _scenario_body(f)
+            + "\n## 風險與紀律提醒\n"
+            + "1. 融資部位須嚴控維持率，接近追繳線優先減碼\n"
+            + "2. 勿因沉沒成本無前提攤平\n"
+        )
+        codes = [c for c, _ in run_position_checks(body, f)]
+        self.assertNotIn("position_margin_no_risk", codes)
+
+    def test_cash_position_skips_margin_gate(self) -> None:
+        f = _facts(60.0, "50", uses_margin=False)
+        body = _scenario_body(f)
+        codes = [c for c, _ in run_position_checks(body, f)]
+        self.assertNotIn("position_margin_no_risk", codes)
 
 
 if __name__ == "__main__":

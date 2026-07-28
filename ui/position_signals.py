@@ -65,6 +65,19 @@ RISK_CONTROL_KEYWORDS = (
 )
 TRIGGER_KEYWORDS = ("觸發", "條件", "若", "一旦", "則")
 BREAKEVEN_ACTION_KEYWORDS = ("出場", "加碼", "減碼", "停損", "觀望", "解套")
+MARGIN_RISK_KEYWORDS = (
+    "追繳",
+    "斷頭",
+    "维持率",
+    "維持率",
+    "強制平倉",
+    "强制平仓",
+    "融資風險",
+    "融资风险",
+    "融資追繳",
+    "融资追缴",
+)
+_RISK_SECTION_KEYWORDS = ("風險", "纪律", "紀律")
 
 PNL_BUCKET_LABEL = {
     "profit_large": "大幅獲利（逾 15%）",
@@ -151,6 +164,7 @@ class PositionFacts:
     stop_loss_hint: str = ""
     take_profit_hint: str = ""
     required_action_hint: str = ""
+    uses_margin: bool = False
     scenario_plan: ScenarioPlan | None = None
     anchors: list[str] = field(default_factory=list)
 
@@ -290,8 +304,8 @@ def _position_bias(bucket: str) -> str:
     }[bucket]
 
 
-def _required_action_hint(bucket: str) -> str:
-    return {
+def _required_action_hint(bucket: str, *, uses_margin: bool = False) -> str:
+    base = {
         "profit_large": "停利 / 移動停損 / 獲利了結 / 分批 / 續抱（擇一並說明）",
         "profit_small": "加碼條件 / 停利 / 續抱 / 回吐風險（擇一）",
         "breakeven": "明確的出場或加碼觸發價（含條件）",
@@ -299,6 +313,11 @@ def _required_action_hint(bucket: str) -> str:
         "loss_large": "停損 / 減碼 / 出場等防禦手段",
         "unknown": "",
     }[bucket]
+    if uses_margin and base:
+        return f"{base}；融資部位另須談追繳／斷頭／維持率或減碼防禦"
+    if uses_margin:
+        return "融資部位須談追繳／斷頭／維持率或減碼防禦"
+    return base
 
 
 def _normalize_weights(scores: dict[str, int]) -> dict[str, int]:
@@ -541,6 +560,7 @@ def build_position_facts(
     shares: int,
     chip_facts=None,
     base_rates: dict | None = None,
+    uses_margin: bool = False,
 ) -> PositionFacts:
     close_price = _to_float(row.get("收盤價"))
     ma20 = _to_float(row.get("MA20"))
@@ -590,7 +610,8 @@ def build_position_facts(
         take_profit_hint=str(trade_levels["take_profit_hint"]),
         breakeven_move_pct=round(breakeven_move, 2) if breakeven_move is not None else None,
         position_bias=bias,
-        required_action_hint=_required_action_hint(bucket),
+        uses_margin=bool(uses_margin),
+        required_action_hint=_required_action_hint(bucket, uses_margin=bool(uses_margin)),
     )
     if chip_facts is not None:
         facts.scenario_plan = build_scenario_plan(facts, chip_facts, base_rates)
@@ -600,6 +621,8 @@ def build_position_facts(
 
 def _build_anchors(facts: PositionFacts) -> list[str]:
     anchors: list[str] = []
+    if facts.uses_margin:
+        anchors.append("此部位使用融資（須留意追繳／斷頭與減碼防禦）")
     if facts.unrealized_pnl_pct is not None:
         anchors.append(
             f"未實現損益 {facts.unrealized_pnl_pct:+.2f}%"
@@ -665,6 +688,9 @@ def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
     lines = [
         "【部位狀態（系統試算，操作情境須對齊此狀態）】",
     ]
+    lines.append(
+        f"- 是否使用融資：{'是（融資部位）' if facts.uses_margin else '否（現股）'}"
+    )
     if facts.unrealized_pnl_pct is not None:
         lines.append(
             f"- 未實現損益：{facts.unrealized_pnl_pct:+.2f}%"
@@ -889,6 +915,24 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             )
 
     issues.extend(_check_scenario_plan(region, facts))
+
+    if facts.uses_margin:
+        risk_region = _slice_after_keywords(text, _RISK_SECTION_KEYWORDS)
+        margin_scope = (
+            f"{risk_region}\n{region}" if risk_region.strip() else text
+        )
+        has_explicit_margin_risk = _contains_any(margin_scope, MARGIN_RISK_KEYWORDS)
+        has_margin_and_defense = ("融資" in margin_scope or "融资" in margin_scope) and (
+            _contains_any(margin_scope, ("減碼", "停損", "出場", "認賠"))
+        )
+        if not (has_explicit_margin_risk or has_margin_and_defense):
+            issues.append(
+                (
+                    "position_margin_no_risk",
+                    "此部位標示為融資，操作情境或風險提醒須談追繳／斷頭／維持率，"
+                    "或明確提出融資減碼／停損防禦",
+                )
+            )
 
     return issues
 
