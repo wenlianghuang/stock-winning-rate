@@ -34,7 +34,7 @@ from portfolio_data import (
 )
 from validate_portfolio_report import ValidationResult, validate_portfolio_report
 
-MAX_ROUNDS_DEFAULT = 6
+MAX_ROUNDS_DEFAULT = 8
 AGY_TIMEOUT_SEC = 900
 PROFILE_CHOICES = ("conservative", "balanced", "aggressive")
 

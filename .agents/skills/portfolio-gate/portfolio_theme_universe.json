@@ -1,30 +1,60 @@
 {
   "_comment": "主題投資組合候選池。每個 themes.* 是獨立種類；使用者每次可選 1～3 個組合成袖口。同一檔股票可掛多個 themes。擴充種類：只加 themes 條目並為 candidates 掛上對應 themes 即可。",
   "themes": {
-    "financials": {
-      "label": "金融",
-      "style": "defensive",
-      "risk_hint": "相對防禦、偏息收；仍受利率與信用循環影響"
+    "ai": {
+      "label": "AI",
+      "style": "growth",
+      "risk_hint": "成長／題材導向，估值與景氣敏感度高"
     },
-    "dividend": {
-      "label": "高股息",
-      "style": "defensive",
-      "risk_hint": "以息收為主；股價波動通常低於純題材股，但不保證配息維持"
-    },
-    "telecom": {
-      "label": "電信",
-      "style": "defensive",
-      "risk_hint": "現金流較穩、波動相對低；成長性通常有限"
+    "biotech": {
+      "label": "生技",
+      "style": "growth",
+      "risk_hint": "研發／授權事件驅動，個股非系統性風險高"
     },
     "consumer": {
       "label": "食品消費",
       "style": "defensive",
       "risk_hint": "防禦型消費需求較穩，但漲幅空間通常有限"
     },
-    "ai": {
-      "label": "AI",
+    "dividend": {
+      "label": "高股息",
+      "style": "defensive",
+      "risk_hint": "以息收為主；股價波動通常低於純題材股，但不保證配息維持"
+    },
+    "financials": {
+      "label": "金融",
+      "style": "defensive",
+      "risk_hint": "相對防禦、偏息收；仍受利率與信用循環影響"
+    },
+    "green_energy": {
+      "label": "綠能／儲能",
       "style": "growth",
-      "risk_hint": "成長／題材導向，估值與景氣敏感度高"
+      "risk_hint": "政策與題材驅動強，營運能見度與估值波動都偏高"
+    },
+    "memory": {
+      "label": "記憶體",
+      "style": "growth",
+      "risk_hint": "與電子週期、記憶體供需連動；波動通常高於金融"
+    },
+    "optical_comms": {
+      "label": "光通訊",
+      "style": "growth",
+      "risk_hint": "與雲端資本支出及光模組／光纖供需連動；波動通常高"
+    },
+    "panel": {
+      "label": "面板",
+      "style": "cyclical",
+      "risk_hint": "與面板價格週期、消費電子需求連動；波動通常高"
+    },
+    "passive_components": {
+      "label": "被動元件",
+      "style": "cyclical",
+      "risk_hint": "與電子週期、被動元件供需連動；波動通常高於金融"
+    },
+    "pcb": {
+      "label": "載板／PCB",
+      "style": "cyclical",
+      "risk_hint": "與電子週期、載板供需連動；題材熱時波動放大"
     },
     "semiconductor": {
       "label": "半導體",
@@ -36,104 +66,1119 @@
       "style": "growth",
       "risk_hint": "與雲端／AI 資本支出連動強，訂單與毛利波動大"
     },
-    "pcb": {
-      "label": "載板／PCB",
-      "style": "cyclical",
-      "risk_hint": "與電子週期、載板供需連動；題材熱時波動放大"
-    },
-    "thermal": {
-      "label": "散熱",
-      "style": "cyclical",
-      "risk_hint": "題材／景氣循環色彩較濃，波動通常高於金融"
-    },
     "shipping": {
       "label": "航運",
       "style": "cyclical",
       "risk_hint": "運價與景氣循環敏感，波動通常很大"
     },
-    "green_energy": {
-      "label": "綠能／儲能",
-      "style": "growth",
-      "risk_hint": "政策與題材驅動強，營運能見度與估值波動都偏高"
+    "telecom": {
+      "label": "電信",
+      "style": "defensive",
+      "risk_hint": "現金流較穩、波動相對低；成長性通常有限"
     },
-    "biotech": {
-      "label": "生技",
-      "style": "growth",
-      "risk_hint": "研發／授權事件驅動，個股非系統性風險高"
+    "test_equipment": {
+      "label": "檢測設備",
+      "style": "cyclical",
+      "risk_hint": "與半導體／LED 資本支出與設備訂單連動；波動通常高"
+    },
+    "thermal": {
+      "label": "散熱",
+      "style": "cyclical",
+      "risk_hint": "題材／景氣循環色彩較濃，波動通常高於金融"
     }
   },
   "candidates": [
-    {"id": "0055", "name": "元大MSCI金融", "asset_class": "etf", "category": "theme_etf", "sector": "etf_theme", "themes": ["financials"], "defensive": true},
-    {"id": "2881", "name": "富邦金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2882", "name": "國泰金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2884", "name": "玉山金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2885", "name": "元大金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2886", "name": "兆豐金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2891", "name": "中信金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "2892", "name": "第一金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-    {"id": "5880", "name": "合庫金", "asset_class": "stock", "category": "theme_stock", "sector": "financials", "themes": ["financials"], "defensive": true},
-
-    {"id": "0056", "name": "元大高股息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "themes": ["dividend"], "defensive": true},
-    {"id": "00878", "name": "國泰永續高股息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "themes": ["dividend", "financials"], "defensive": true},
-    {"id": "00919", "name": "群益台灣精選高息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "themes": ["dividend"], "defensive": true},
-    {"id": "00929", "name": "復華台灣科技優息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "themes": ["dividend"], "defensive": true},
-    {"id": "00940", "name": "元大台灣價值高息", "asset_class": "etf", "category": "dividend_etf", "sector": "etf_dividend", "themes": ["dividend"], "defensive": true},
-
-    {"id": "2412", "name": "中華電", "asset_class": "stock", "category": "theme_stock", "sector": "telecom", "themes": ["telecom", "dividend"], "defensive": true},
-    {"id": "3045", "name": "台灣大", "asset_class": "stock", "category": "theme_stock", "sector": "telecom", "themes": ["telecom"], "defensive": true},
-    {"id": "4904", "name": "遠傳", "asset_class": "stock", "category": "theme_stock", "sector": "telecom", "themes": ["telecom"], "defensive": true},
-
-    {"id": "1216", "name": "統一", "asset_class": "stock", "category": "theme_stock", "sector": "food", "themes": ["consumer"], "defensive": true},
-    {"id": "2912", "name": "統一超", "asset_class": "stock", "category": "theme_stock", "sector": "food", "themes": ["consumer"], "defensive": true},
-    {"id": "1232", "name": "大統益", "asset_class": "stock", "category": "theme_stock", "sector": "food", "themes": ["consumer"], "defensive": true},
-    {"id": "1227", "name": "佳格", "asset_class": "stock", "category": "theme_stock", "sector": "food", "themes": ["consumer"], "defensive": true},
-
-    {"id": "00881", "name": "國泰台灣5G+", "asset_class": "etf", "category": "theme_etf", "sector": "etf_theme", "themes": ["ai", "semiconductor"], "defensive": false},
-    {"id": "2330", "name": "台積電", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["ai", "semiconductor"], "defensive": false},
-    {"id": "2454", "name": "聯發科", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["ai", "semiconductor"], "defensive": false},
-    {"id": "2303", "name": "聯電", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["semiconductor"], "defensive": false},
-    {"id": "3711", "name": "日月光投控", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["semiconductor"], "defensive": false},
-    {"id": "2379", "name": "瑞昱", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["semiconductor"], "defensive": false},
-    {"id": "3034", "name": "聯詠", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["semiconductor"], "defensive": false},
-    {"id": "3661", "name": "世芯-KY", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["ai", "semiconductor"], "defensive": false},
-    {"id": "3443", "name": "創意", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["ai", "semiconductor"], "defensive": false},
-
-    {"id": "2382", "name": "廣達", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["ai", "servers"], "defensive": false},
-    {"id": "3231", "name": "緯創", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["ai", "servers"], "defensive": false},
-    {"id": "6669", "name": "緯穎", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["ai", "servers"], "defensive": false},
-    {"id": "2356", "name": "英業達", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["servers"], "defensive": false},
-    {"id": "2324", "name": "仁寶", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["servers"], "defensive": false},
-    {"id": "2377", "name": "微星", "asset_class": "stock", "category": "theme_stock", "sector": "computer_hardware", "themes": ["servers"], "defensive": false},
-
-    {"id": "3037", "name": "欣興", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb"], "defensive": false},
-    {"id": "8046", "name": "南電", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb"], "defensive": false},
-    {"id": "2368", "name": "金像電", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb"], "defensive": false},
-    {"id": "3189", "name": "景碩", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb"], "defensive": false},
-    {"id": "6213", "name": "聯茂", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb", "thermal"], "defensive": false},
-    {"id": "2383", "name": "台光電", "asset_class": "stock", "category": "theme_stock", "sector": "pcb", "themes": ["pcb"], "defensive": false},
-
-    {"id": "3017", "name": "奇鋐", "asset_class": "stock", "category": "theme_stock", "sector": "thermal", "themes": ["thermal"], "defensive": false},
-    {"id": "3324", "name": "雙鴻", "asset_class": "stock", "category": "theme_stock", "sector": "thermal", "themes": ["thermal"], "defensive": false},
-    {"id": "3653", "name": "健策", "asset_class": "stock", "category": "theme_stock", "sector": "thermal", "themes": ["thermal"], "defensive": false},
-    {"id": "2421", "name": "建準", "asset_class": "stock", "category": "theme_stock", "sector": "thermal", "themes": ["thermal"], "defensive": false},
-    {"id": "3483", "name": "力致", "asset_class": "stock", "category": "theme_stock", "sector": "thermal", "themes": ["thermal"], "defensive": false},
-    {"id": "6239", "name": "力成", "asset_class": "stock", "category": "theme_stock", "sector": "semiconductor", "themes": ["semiconductor"], "defensive": false},
-
-    {"id": "2603", "name": "長榮", "asset_class": "stock", "category": "theme_stock", "sector": "shipping", "themes": ["shipping"], "defensive": false},
-    {"id": "2609", "name": "陽明", "asset_class": "stock", "category": "theme_stock", "sector": "shipping", "themes": ["shipping"], "defensive": false},
-    {"id": "2615", "name": "萬海", "asset_class": "stock", "category": "theme_stock", "sector": "shipping", "themes": ["shipping"], "defensive": false},
-    {"id": "2606", "name": "裕民", "asset_class": "stock", "category": "theme_stock", "sector": "shipping", "themes": ["shipping"], "defensive": false},
-
-    {"id": "2308", "name": "台達電", "asset_class": "stock", "category": "theme_stock", "sector": "electronic_components", "themes": ["ai", "green_energy"], "defensive": false},
-    {"id": "1504", "name": "東元", "asset_class": "stock", "category": "theme_stock", "sector": "green_energy", "themes": ["green_energy"], "defensive": false},
-    {"id": "6443", "name": "元晶", "asset_class": "stock", "category": "theme_stock", "sector": "green_energy", "themes": ["green_energy"], "defensive": false},
-    {"id": "6869", "name": "雲豹能源", "asset_class": "stock", "category": "theme_stock", "sector": "green_energy", "themes": ["green_energy"], "defensive": false},
-    {"id": "3576", "name": "聯合再生", "asset_class": "stock", "category": "theme_stock", "sector": "green_energy", "themes": ["green_energy"], "defensive": false},
-
-    {"id": "4142", "name": "國光生", "asset_class": "stock", "category": "theme_stock", "sector": "biotech", "themes": ["biotech"], "defensive": false},
-    {"id": "4743", "name": "合一", "asset_class": "stock", "category": "theme_stock", "sector": "biotech", "themes": ["biotech"], "defensive": false},
-    {"id": "6547", "name": "高端疫苗", "asset_class": "stock", "category": "theme_stock", "sector": "biotech", "themes": ["biotech"], "defensive": false},
-    {"id": "1784", "name": "訊聯", "asset_class": "stock", "category": "theme_stock", "sector": "biotech", "themes": ["biotech"], "defensive": false},
-    {"id": "6446", "name": "藥華藥", "asset_class": "stock", "category": "theme_stock", "sector": "biotech", "themes": ["biotech"], "defensive": false}
+    {
+      "id": "0055",
+      "name": "元大MSCI金融",
+      "asset_class": "etf",
+      "category": "theme_etf",
+      "sector": "etf_theme",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2881",
+      "name": "富邦金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2882",
+      "name": "國泰金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2884",
+      "name": "玉山金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2885",
+      "name": "元大金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2886",
+      "name": "兆豐金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2891",
+      "name": "中信金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2892",
+      "name": "第一金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "5880",
+      "name": "合庫金",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "financials",
+      "themes": [
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "0056",
+      "name": "元大高股息",
+      "asset_class": "etf",
+      "category": "dividend_etf",
+      "sector": "etf_dividend",
+      "themes": [
+        "dividend"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "00878",
+      "name": "國泰永續高股息",
+      "asset_class": "etf",
+      "category": "dividend_etf",
+      "sector": "etf_dividend",
+      "themes": [
+        "dividend",
+        "financials"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "00919",
+      "name": "群益台灣精選高息",
+      "asset_class": "etf",
+      "category": "dividend_etf",
+      "sector": "etf_dividend",
+      "themes": [
+        "dividend"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "00929",
+      "name": "復華台灣科技優息",
+      "asset_class": "etf",
+      "category": "dividend_etf",
+      "sector": "etf_dividend",
+      "themes": [
+        "dividend"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "00940",
+      "name": "元大台灣價值高息",
+      "asset_class": "etf",
+      "category": "dividend_etf",
+      "sector": "etf_dividend",
+      "themes": [
+        "dividend"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2412",
+      "name": "中華電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "telecom",
+      "themes": [
+        "telecom",
+        "dividend"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "3045",
+      "name": "台灣大",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "telecom",
+      "themes": [
+        "telecom"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "4904",
+      "name": "遠傳",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "telecom",
+      "themes": [
+        "telecom"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "1216",
+      "name": "統一",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "food",
+      "themes": [
+        "consumer"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "2912",
+      "name": "統一超",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "food",
+      "themes": [
+        "consumer"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "1232",
+      "name": "大統益",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "food",
+      "themes": [
+        "consumer"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "1227",
+      "name": "佳格",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "food",
+      "themes": [
+        "consumer"
+      ],
+      "defensive": true
+    },
+    {
+      "id": "00881",
+      "name": "國泰台灣5G+",
+      "asset_class": "etf",
+      "category": "theme_etf",
+      "sector": "etf_theme",
+      "themes": [
+        "ai",
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2330",
+      "name": "台積電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "ai",
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2454",
+      "name": "聯發科",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "ai",
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2303",
+      "name": "聯電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3711",
+      "name": "日月光投控",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2379",
+      "name": "瑞昱",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3034",
+      "name": "聯詠",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3661",
+      "name": "世芯-KY",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "ai",
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3443",
+      "name": "創意",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "ai",
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2382",
+      "name": "廣達",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "ai",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3231",
+      "name": "緯創",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "ai",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6669",
+      "name": "緯穎",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "ai",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2356",
+      "name": "英業達",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2324",
+      "name": "仁寶",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2377",
+      "name": "微星",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3037",
+      "name": "欣興",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8046",
+      "name": "南電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2368",
+      "name": "金像電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3189",
+      "name": "景碩",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6213",
+      "name": "聯茂",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb",
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2383",
+      "name": "台光電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3017",
+      "name": "奇鋐",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3324",
+      "name": "雙鴻",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3653",
+      "name": "健策",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2421",
+      "name": "建準",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3483",
+      "name": "力致",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6239",
+      "name": "力成",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2603",
+      "name": "長榮",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "shipping",
+      "themes": [
+        "shipping"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2609",
+      "name": "陽明",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "shipping",
+      "themes": [
+        "shipping"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2615",
+      "name": "萬海",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "shipping",
+      "themes": [
+        "shipping"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2606",
+      "name": "裕民",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "shipping",
+      "themes": [
+        "shipping"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2308",
+      "name": "台達電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "electronic_components",
+      "themes": [
+        "ai",
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "1504",
+      "name": "東元",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "green_energy",
+      "themes": [
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6443",
+      "name": "元晶",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "green_energy",
+      "themes": [
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6869",
+      "name": "雲豹能源",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "green_energy",
+      "themes": [
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3576",
+      "name": "聯合再生",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "green_energy",
+      "themes": [
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4142",
+      "name": "國光生",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "biotech",
+      "themes": [
+        "biotech"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4743",
+      "name": "合一",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "biotech",
+      "themes": [
+        "biotech"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6547",
+      "name": "高端疫苗",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "biotech",
+      "themes": [
+        "biotech"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "1784",
+      "name": "訊聯",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "biotech",
+      "themes": [
+        "biotech"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6446",
+      "name": "藥華藥",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "biotech",
+      "themes": [
+        "biotech"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2409",
+      "name": "友達",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "panel",
+      "themes": [
+        "panel"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3714",
+      "name": "富采",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor",
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3305",
+      "name": "昇貿",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb",
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4938",
+      "name": "和碩",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "computer_hardware",
+      "themes": [
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4958",
+      "name": "臻鼎-KY",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3481",
+      "name": "群創",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "panel",
+      "themes": [
+        "panel"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8299",
+      "name": "群聯",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6770",
+      "name": "力積電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3006",
+      "name": "晶豪科",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2408",
+      "name": "南亞科",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2337",
+      "name": "旺宏",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "5351",
+      "name": "鈺創",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3260",
+      "name": "威剛",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "panel",
+      "themes": [
+        "panel"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2451",
+      "name": "創見",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "5289",
+      "name": "宜鼎",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8271",
+      "name": "宇瞻",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8088",
+      "name": "品安",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "memory",
+      "themes": [
+        "memory"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8150",
+      "name": "南茂",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "panel",
+      "themes": [
+        "panel"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2327",
+      "name": "國巨*",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components",
+        "ai"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2492",
+      "name": "華新科",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components",
+        "pcb",
+        "green_energy"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3026",
+      "name": "禾伸堂",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components",
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6862",
+      "name": "三集瑞-KY",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components",
+        "green_energy",
+        "ai"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3357",
+      "name": "臺慶科",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2478",
+      "name": "大毅",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6449",
+      "name": "鈺邦",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "passive_components",
+      "themes": [
+        "passive_components"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3363",
+      "name": "上詮",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3081",
+      "name": "聯亞",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3163",
+      "name": "波若威",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4979",
+      "name": "華星光",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms",
+        "ai"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3450",
+      "name": "聯鈞",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor",
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6451",
+      "name": "訊芯-KY",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2455",
+      "name": "全新",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "4991",
+      "name": "環宇-KY",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "semiconductor",
+      "themes": [
+        "semiconductor",
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2345",
+      "name": "智邦",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3008",
+      "name": "大立光",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "optical_comms",
+      "themes": [
+        "optical_comms"
+      ],
+      "defensive": false
+    }
   ]
 }

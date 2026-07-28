@@ -6,6 +6,8 @@ for *every* date, which makes multi-week backfills hit FinMind rate limits fast.
 This tool instead fetches each stock's datasets **once** for the full span and
 materializes one snapshot directory per trading day locally, reusing the exact
 same builders so the output is byte-compatible with the normal daily job.
+TAIEX market context is fetched once the same way, then sliced per date via
+``market_context_from_rows``.
 
 Output matches what ``outcome_label`` + ``calibrate_thresholds`` consume:
 ``reports/stock/{date}/tw_stock_{id}.csv`` (snapshot) and ``..._history.csv``.
@@ -50,6 +52,7 @@ from fetch_chip_report import (  # noqa: E402
     DEFAULT_LOOKBACK_DAYS,
     MA20_PERIOD,
     MARKET_COLUMNS,
+    MARKET_INDEX_ID,
     SUMMARY_COLUMNS,
     FinMindClient,
     YahooMajorFlowClient,
@@ -57,9 +60,10 @@ from fetch_chip_report import (  # noqa: E402
     build_chart_history_rows,
     build_daily_row,
     compute_summary_fields,
-    fetch_market_context,
     fetch_stock_datasets,
+    index_rows_by_date,
     load_stock_names,
+    market_context_from_rows,
     stock_chart_history_csv_path,
     stock_csv_path,
     stock_history_csv_path,
@@ -176,16 +180,28 @@ def backfill(
     stock_names = load_stock_names(client)
     yahoo = None if skip_major else YahooMajorFlowClient()
 
-    # 大盤脈絡：每個交易日一組（全市場共用），先建好快取
+    # 大盤脈絡：一次抓取全區間，本地切日（與個股同模式；省 ~N 次 FinMind 請求）
     market_by_date: dict[str, dict] = {}
+    taiex_rows: dict = {}
+    try:
+        taiex_rows = index_rows_by_date(
+            client.fetch_dataset(
+                "TaiwanStockPrice",
+                stock_id=MARKET_INDEX_ID,
+                start_date=range_start,
+                end_date=end,
+            )
+        )
+    except Exception as exc:  # 大盤脈絡失敗不中斷個股回補
+        print(f"WARNING: 大盤脈絡抓取失敗：{exc}", file=sys.stderr)
+    time.sleep(sleep)
+
     for d in dates:
         lb = resolve_lookback_dates(d, lookback_days)
-        try:
-            market_by_date[d] = fetch_market_context(client, d, lb)
-        except Exception as exc:  # 大盤脈絡失敗不中斷
-            print(f"WARNING: 大盤脈絡 {d} 失敗：{exc}", file=sys.stderr)
+        if taiex_rows:
+            market_by_date[d] = market_context_from_rows(taiex_rows, d, lb)
+        else:
             market_by_date[d] = {col: "" for col in MARKET_COLUMNS}
-        time.sleep(sleep)
 
     written = 0
     for sid in stock_ids:

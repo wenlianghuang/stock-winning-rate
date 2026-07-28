@@ -33,30 +33,55 @@ PROFILE_LABEL = {
 
 # theme id → display (fallbacks; full catalog lives in portfolio_theme_universe.json)
 DEFAULT_THEME_META: dict[str, dict[str, str]] = {
-    "financials": {
-        "label": "金融",
-        "style": "defensive",
-        "risk_hint": "相對防禦、偏息收；仍受利率與信用循環影響",
+    "ai": {
+        "label": "AI",
+        "style": "growth",
+        "risk_hint": "成長／題材導向，估值與景氣敏感度高",
     },
-    "dividend": {
-        "label": "高股息",
-        "style": "defensive",
-        "risk_hint": "以息收為主；股價波動通常低於純題材股，但不保證配息維持",
-    },
-    "telecom": {
-        "label": "電信",
-        "style": "defensive",
-        "risk_hint": "現金流較穩、波動相對低；成長性通常有限",
+    "biotech": {
+        "label": "生技",
+        "style": "growth",
+        "risk_hint": "研發／授權事件驅動，個股非系統性風險高",
     },
     "consumer": {
         "label": "食品消費",
         "style": "defensive",
         "risk_hint": "防禦型消費需求較穩，但漲幅空間通常有限",
     },
-    "ai": {
-        "label": "AI",
+    "dividend": {
+        "label": "高股息",
+        "style": "defensive",
+        "risk_hint": "以息收為主；股價波動通常低於純題材股，但不保證配息維持",
+    },
+    "financials": {
+        "label": "金融",
+        "style": "defensive",
+        "risk_hint": "相對防禦、偏息收；仍受利率與信用循環影響",
+    },
+    "green_energy": {
+        "label": "綠能／儲能",
         "style": "growth",
-        "risk_hint": "成長／題材導向，估值與景氣敏感度高",
+        "risk_hint": "政策與題材驅動強，營運能見度與估值波動都偏高",
+    },
+    "memory": {
+        "label": "記憶體",
+        "style": "growth",
+        "risk_hint": "與電子週期、記憶體供需連動；波動通常高於金融",
+    },
+    "panel": {
+        "label": "面板",
+        "style": "cyclical",
+        "risk_hint": "與面板價格週期、消費電子需求連動；波動通常高",
+    },
+    "passive_components": {
+        "label": "被動元件",
+        "style": "cyclical",
+        "risk_hint": "與電子週期、被動元件供需連動；波動通常高於金融",
+    },
+    "pcb": {
+        "label": "載板／PCB",
+        "style": "cyclical",
+        "risk_hint": "與電子週期、載板供需連動；題材熱時波動放大",
     },
     "semiconductor": {
         "label": "半導體",
@@ -68,30 +93,25 @@ DEFAULT_THEME_META: dict[str, dict[str, str]] = {
         "style": "growth",
         "risk_hint": "與雲端／AI 資本支出連動強，訂單與毛利波動大",
     },
-    "pcb": {
-        "label": "載板／PCB",
+    "shipping": {
+        "label": "航運",
         "style": "cyclical",
-        "risk_hint": "與電子週期、載板供需連動；題材熱時波動放大",
+        "risk_hint": "運價與景氣循環敏感，波動通常很大",
+    },
+    "telecom": {
+        "label": "電信",
+        "style": "defensive",
+        "risk_hint": "現金流較穩、波動相對低；成長性通常有限",
     },
     "thermal": {
         "label": "散熱",
         "style": "cyclical",
         "risk_hint": "題材／景氣循環色彩較濃，波動通常高於金融",
     },
-    "shipping": {
-        "label": "航運",
-        "style": "cyclical",
-        "risk_hint": "運價與景氣循環敏感，波動通常很大",
-    },
-    "green_energy": {
-        "label": "綠能／儲能",
+    "optical_comms": {
+        "label": "光通訊",
         "style": "growth",
-        "risk_hint": "政策與題材驅動強，營運能見度與估值波動都偏高",
-    },
-    "biotech": {
-        "label": "生技",
-        "style": "growth",
-        "risk_hint": "研發／授權事件驅動，個股非系統性風險高",
+        "risk_hint": "與 AI 與雲端資本支出連動強，訂單與毛利波動大",
     },
 }
 
@@ -177,6 +197,8 @@ SECTOR_LABEL = {
     "optics": "光學",
     "pcb": "電路板",
     "panel": "面板",
+    "passive_components": "被動元件",
+    "memory": "記憶體",
     "network_equipment": "網通設備",
     "optoelectronics": "光電",
     "financials": "金融",

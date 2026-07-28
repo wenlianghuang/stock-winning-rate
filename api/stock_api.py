@@ -339,6 +339,42 @@ def _resolve_history_path(stock_id: str, trade_date: str | None) -> Path | None:
     return _find_history_path(stock_id, trade_date)
 
 
+def _fetch_stock_chart_data(stock_id: str, trade_date: str | None) -> None:
+    """Fetch chip/price CSVs for one stock (no report-gate / no markdown)."""
+    stock_args = [
+        "--stocks",
+        stock_id,
+        "--chart-lookback-days",
+        str(CHART_LOOKBACK_DAYS),
+    ]
+    if trade_date:
+        stock_args.extend(["--date", trade_date])
+    _run_script(STOCK_SCRIPT, stock_args)
+
+
+def _load_stock_chart_payload(
+    stock_id: str,
+    date: str | None,
+) -> dict[str, Any] | None:
+    history_path = _resolve_history_path(stock_id, date)
+    history_json = _load_history_for_api(history_path)
+    if not history_json:
+        return None
+
+    trade_date = date or (history_path.parent.name if history_path else None)
+    csv_path = _find_csv_path(stock_id, trade_date)
+    stock_name = _infer_stock_name_from_csv(csv_path) if csv_path else None
+    facts_json = _load_facts_json(_find_facts_path(stock_id, trade_date))
+
+    return {
+        "stock_id": stock_id,
+        "stock_name": stock_name,
+        "trade_date": trade_date,
+        "history_json": history_json,
+        "facts_json": facts_json,
+    }
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -747,6 +783,41 @@ def create_app() -> FastAPI:
             "trade_date": trade_date,
             "note": note,
         }
+
+    @app.get("/stocks/{stock_id}/chart")
+    def get_stock_chart(
+        stock_id: str,
+        date: str | None = None,
+        fetch: bool = True,
+    ) -> dict[str, Any]:
+        """Return price history + chip facts for website K-line charts.
+
+        Reads existing CSVs first. If missing and ``fetch=true`` (default),
+        runs stock-report for this stock only (no report-gate / no markdown).
+        """
+        stock_id = stock_id.strip()
+        if not re.match(r"^\d{4,6}$", stock_id):
+            raise HTTPException(status_code=400, detail="stock_id 須為 4～6 位數台股代號")
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+
+        payload = _load_stock_chart_payload(stock_id, date)
+        if payload is None and fetch:
+            try:
+                _fetch_stock_chart_data(stock_id, date)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"圖表資料抓取失敗：{exc}",
+                ) from exc
+            payload = _load_stock_chart_payload(stock_id, date)
+
+        if payload is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"找不到 {stock_id} 的圖表資料。",
+            )
+        return payload
 
     @app.get("/us-indices")
     def us_indices() -> dict[str, Any]:

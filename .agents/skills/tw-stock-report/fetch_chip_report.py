@@ -1007,33 +1007,20 @@ def compute_summary_fields(
     }
 
 
-def fetch_market_context(
-    client: FinMindClient,
+def market_context_from_rows(
+    rows: dict[str, dict[str, Any]],
     trade_date: str,
     lookback_dates: list[str],
 ) -> dict[str, Any]:
-    """Fetch 加權指數（TAIEX）context: 收盤、當日漲跌幅、MA5/MA20、區間漲跌幅。
+    """Compute 加權指數脈絡 from an already-fetched TAIEX price index.
 
-    大盤脈絡屬全市場資料（與個股無關），main() 每個交易日抓一次即可共用。
+    Uses only rows on or before ``trade_date`` (no look-ahead). Safe to pass a
+    longer pre-fetched range (e.g. backfill once for the full span) — MA5/MA20
+    only consume the trailing period closes.
     """
     empty = {col: "" for col in MARKET_COLUMNS}
     if not lookback_dates:
         lookback_dates = [trade_date]
-
-    ma_dates = resolve_lookback_dates(trade_date, MA20_PERIOD)
-    range_start = min(lookback_dates[0], ma_dates[0])
-    try:
-        rows = index_rows_by_date(
-            client.fetch_dataset(
-                "TaiwanStockPrice",
-                stock_id=MARKET_INDEX_ID,
-                start_date=range_start,
-                end_date=trade_date,
-            )
-        )
-    except Exception as exc:  # 大盤為附加脈絡，失敗不應中斷個股抓取
-        print(f"WARNING: 加權指數脈絡取得失敗：{exc}", file=sys.stderr)
-        return empty
 
     closes_by_date = {
         day: _to_float(rows[day].get("close"))
@@ -1075,6 +1062,38 @@ def fetch_market_context(
         "大盤收盤偏離MA20_%": _ma_deviation_pct(last_close, ma20_val),
         "大盤區間漲跌幅_%": period_return,
     }
+
+
+def fetch_market_context(
+    client: FinMindClient,
+    trade_date: str,
+    lookback_dates: list[str],
+) -> dict[str, Any]:
+    """Fetch 加權指數（TAIEX）context: 收盤、當日漲跌幅、MA5/MA20、區間漲跌幅。
+
+    大盤脈絡屬全市場資料（與個股無關），單日 job 抓一次即可共用；歷史回補請改用
+    ``market_context_from_rows`` 對一次抓取的區間做本地切日。
+    """
+    empty = {col: "" for col in MARKET_COLUMNS}
+    if not lookback_dates:
+        lookback_dates = [trade_date]
+
+    ma_dates = resolve_lookback_dates(trade_date, MA20_PERIOD)
+    range_start = min(lookback_dates[0], ma_dates[0])
+    try:
+        rows = index_rows_by_date(
+            client.fetch_dataset(
+                "TaiwanStockPrice",
+                stock_id=MARKET_INDEX_ID,
+                start_date=range_start,
+                end_date=trade_date,
+            )
+        )
+    except Exception as exc:  # 大盤為附加脈絡，失敗不應中斷個股抓取
+        print(f"WARNING: 加權指數脈絡取得失敗：{exc}", file=sys.stderr)
+        return empty
+
+    return market_context_from_rows(rows, trade_date, lookback_dates)
 
 
 def build_chart_history_rows(

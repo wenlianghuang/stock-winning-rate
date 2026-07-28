@@ -301,9 +301,18 @@ def load_or_fetch_fundamentals(
 # Theme style hints for scoring weights.
 _DEFENSIVE_THEMES = frozenset({"financials", "dividend", "telecom", "consumer"})
 _GROWTH_THEMES = frozenset(
-    {"ai", "semiconductor", "servers", "green_energy", "biotech"}
+    {
+        "ai",
+        "semiconductor",
+        "servers",
+        "green_energy",
+        "biotech",
+        "memory",
+    }
 )
-_CYCLICAL_THEMES = frozenset({"pcb", "thermal", "shipping"})
+_CYCLICAL_THEMES = frozenset(
+    {"pcb", "thermal", "shipping", "panel", "passive_components"}
+)
 
 
 def fundamental_score(
