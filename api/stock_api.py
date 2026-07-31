@@ -87,6 +87,10 @@ class Job:
     share_count: int | None = None
     avg_cost: float | None = None
     uses_margin: bool = False
+    cash_share_count: int | None = None
+    cash_avg_cost: float | None = None
+    margin_share_count: int | None = None
+    margin_avg_cost: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -151,6 +155,10 @@ class CreateJobRequest(BaseModel):
     share_count: int | None = Field(default=None, gt=0)
     avg_cost: float | None = Field(default=None, gt=0)
     uses_margin: bool = False
+    cash_share_count: int | None = Field(default=None, ge=0)
+    cash_avg_cost: float | None = Field(default=None, gt=0)
+    margin_share_count: int | None = Field(default=None, ge=0)
+    margin_avg_cost: float | None = Field(default=None, gt=0)
 
 
 class DigestItem(BaseModel):
@@ -536,19 +544,43 @@ def _run_pipeline(job_id: str) -> None:
 
         position_markdown: str | None = None
         if job.is_holding:
-            if job.share_count is None or job.avg_cost is None:
-                raise ValueError("持股分析需要 share_count 與 avg_cost")
+            cash_n = int(job.cash_share_count or 0)
+            margin_n = int(job.margin_share_count or 0)
+            has_legs = cash_n > 0 or margin_n > 0
+            if has_legs:
+                if cash_n > 0 and job.cash_avg_cost is None:
+                    raise ValueError("現股分析需要 cash_avg_cost")
+                if margin_n > 0 and job.margin_avg_cost is None:
+                    raise ValueError("融資分析需要 margin_avg_cost")
+            elif job.share_count is None or job.avg_cost is None:
+                raise ValueError("持股分析需要 share_count 與 avg_cost，或現股／融資分腿")
 
             with _jobs_lock:
                 _update_job(job, status=JobStatus.POSITIONING)
 
-            position_args = [
-                stock_id,
-                str(job.avg_cost),
-                str(job.share_count),
-            ]
-            if job.uses_margin:
-                position_args.append("--margin")
+            if has_legs:
+                position_args = [stock_id]
+                if cash_n > 0:
+                    position_args.extend(
+                        ["--cash-shares", str(cash_n), "--cash-cost", str(job.cash_avg_cost)]
+                    )
+                if margin_n > 0:
+                    position_args.extend(
+                        [
+                            "--margin-shares",
+                            str(margin_n),
+                            "--margin-cost",
+                            str(job.margin_avg_cost),
+                        ]
+                    )
+            else:
+                position_args = [
+                    stock_id,
+                    str(job.avg_cost),
+                    str(job.share_count),
+                ]
+                if job.uses_margin:
+                    position_args.append("--margin")
             if job.skip_pdf:
                 position_args.append("--skip-pdf")
             if trade_date:
@@ -978,10 +1010,24 @@ def create_app() -> FastAPI:
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:
         if body.is_holding:
-            if body.share_count is None or body.avg_cost is None:
+            cash_n = int(body.cash_share_count or 0)
+            margin_n = int(body.margin_share_count or 0)
+            has_legs = cash_n > 0 or margin_n > 0
+            if has_legs:
+                if cash_n > 0 and body.cash_avg_cost is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="現股分析需要 cash_avg_cost",
+                    )
+                if margin_n > 0 and body.margin_avg_cost is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="融資分析需要 margin_avg_cost",
+                    )
+            elif body.share_count is None or body.avg_cost is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="持股分析需要 share_count 與 avg_cost",
+                    detail="持股分析需要 share_count 與 avg_cost，或現股／融資分腿",
                 )
 
         job_id = uuid.uuid4().hex
@@ -994,7 +1040,17 @@ def create_app() -> FastAPI:
             is_holding=body.is_holding,
             share_count=body.share_count,
             avg_cost=body.avg_cost,
-            uses_margin=bool(body.is_holding and body.uses_margin),
+            uses_margin=bool(
+                body.is_holding
+                and (
+                    body.uses_margin
+                    or int(body.margin_share_count or 0) > 0
+                )
+            ),
+            cash_share_count=body.cash_share_count if body.is_holding else None,
+            cash_avg_cost=body.cash_avg_cost if body.is_holding else None,
+            margin_share_count=body.margin_share_count if body.is_holding else None,
+            margin_avg_cost=body.margin_avg_cost if body.is_holding else None,
         )
         with _jobs_lock:
             _jobs[job_id] = job

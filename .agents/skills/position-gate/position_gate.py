@@ -104,37 +104,44 @@ def _to_holding_info(record: HoldingRecord):
         shares=record.shares,
         note=record.note,
         uses_margin=record.uses_margin,
+        cash_shares=record.cash_shares,
+        cash_avg_cost=record.cash_avg_cost,
+        margin_shares=record.margin_shares,
+        margin_avg_cost=record.margin_avg_cost,
     )
 
 
 def _load_position_facts(
     csv_path: Path, row: dict[str, str], holding: HoldingRecord, chip_facts=None
 ):
-    """Compute deterministic position facts (pnl bucket, cost vs MA20, bias)."""
+    """Compute deterministic dual-leg position facts (cash / margin / combined)."""
     _ensure_import_paths()
     from chip_signals import load_base_rates
     from position_signals import (
-        build_position_facts,
-        position_facts_summary_for_prompt,
+        build_dual_position_facts,
+        dual_position_facts_summary_for_prompt,
         write_position_facts_json,
     )
 
-    pfacts = build_position_facts(
+    pfacts = build_dual_position_facts(
         row,
         stock_id=str(row.get("代碼", holding.stock_id)).strip(),
         stock_name=str(row.get("名稱", holding.stock_id)).strip(),
-        avg_cost=holding.avg_cost,
-        shares=holding.shares,
+        cash_shares=holding.cash_shares,
+        cash_avg_cost=holding.cash_avg_cost,
+        margin_shares=holding.margin_shares,
+        margin_avg_cost=holding.margin_avg_cost,
+        combined_shares=holding.shares,
+        combined_avg_cost=holding.avg_cost,
         chip_facts=chip_facts,
         base_rates=load_base_rates(),
-        uses_margin=holding.uses_margin,
     )
     facts_path = csv_path.with_name(f"{csv_path.stem}.position.facts.json")
     try:
         write_position_facts_json(facts_path, pfacts)
     except OSError:
         pass
-    return pfacts, position_facts_summary_for_prompt(pfacts)
+    return pfacts, dual_position_facts_summary_for_prompt(pfacts)
 
 
 def parse_csv_row(csv_path: Path) -> dict[str, str]:
@@ -263,6 +270,14 @@ POSITION_FIX_HINT_BY_CODE: dict[str, str] = {
     "position_breakeven_no_trigger": "此部位接近損益兩平，操作情境須給明確的出場或加碼觸發條件",
     "position_scenario_unanchored": "操作情境須錨定部位損益（獲利/虧損/成本/均價/套牢），勿泛泛而談",
     "position_margin_no_risk": "此部位為融資，操作情境或風險提醒須談追繳／斷頭／維持率，或明確提出融資減碼／停損",
+    "position_maint_rate_mismatch": "正文寫的維持率與系統試算不符（容差 ±3pp），請改用 position facts 的單檔估算數字",
+    "position_call_distance_mismatch": "正文寫的距追繳空間與系統試算不符，請改用 position facts 數字",
+    "position_call_distance_ignored": "融資壓力為 tight/critical 時，須點出追繳線／距追繳／追繳價，或正確引用系統維持率",
+    "position_margin_pressure_unanchored": "融資接近追繳時不可把技術反彈當主線；須對齊系統主線並強調減碼／防禦",
+    "position_cash_section_missing": "現股與融資同時存在時，須有「現股」專段對齊現股損益",
+    "position_margin_section_missing": "現股與融資同時存在時，須有「融資」專段對齊融資損益",
+    "position_synthesis_missing": "現股與融資同時存在時，須寫綜合結論（優先序／兩邊取捨）",
+    "position_synthesis_priority_mismatch": "綜合結論須對齊系統優先序（例如優先處理融資）",
     "position_scenario_label_missing": "操作情境須列出系統給定的三種市場情境名稱（延續調節/橫盤整理/技術反彈）",
     "position_scenario_weight_missing": "操作情境須標示各情境的權重百分比（與系統一致，加總 100%）",
     "position_scenario_primary_unmarked": "操作情境須標示主線（最高權重情境 +「主線」）",
@@ -321,6 +336,8 @@ def build_fix_prompt(
         "- 須含部位現況、市場面摘要、交叉對照、操作情境、風險提醒、免責聲明\n"
         "- 操作情境須含觸發條件，並依系統給定的三種市場情境權重（勿改百分比）撰寫\n"
         "- 操作情境須標示主線/次線/尾線，並提及觀望/減碼/加碼/停損/獲利了結等方向\n"
+        "- 若系統提供融資維持率／距追繳／追繳價，須引用且不可改寫數字（單檔估算）\n"
+        "- 融資壓力 tight/critical 時須點出追繳線或距追繳，不可把技術反彈標成主線\n"
         "- 市場面須客觀，勿因成本扭曲籌碼解讀\n"
         "- 交叉對照、操作情境、風險提醒請用**文字條列**，不要用表格\n"
         "- 不可臆造新聞；僅能引用系統提供的新聞或註明缺少新聞\n"
@@ -649,6 +666,10 @@ def run_gate(
                     "avg_cost": holding.avg_cost,
                     "shares": holding.shares,
                     "uses_margin": holding.uses_margin,
+                    "cash_shares": holding.cash_shares,
+                    "cash_avg_cost": holding.cash_avg_cost,
+                    "margin_shares": holding.margin_shares,
+                    "margin_avg_cost": holding.margin_avg_cost,
                 },
                 **asdict(round_log),
             },
@@ -776,7 +797,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--margin",
         action="store_true",
-        help="標示此部位使用融資（影響風險敘事與 gate）",
+        help="（相容）整筆視為融資；建議改用 --margin-shares / --margin-cost",
+    )
+    parser.add_argument(
+        "--cash-shares",
+        type=int,
+        default=None,
+        metavar="N",
+        help="現股股數",
+    )
+    parser.add_argument(
+        "--cash-cost",
+        type=float,
+        default=None,
+        metavar="PRICE",
+        help="現股均價（元）",
+    )
+    parser.add_argument(
+        "--margin-shares",
+        type=int,
+        default=None,
+        metavar="N",
+        help="融資股數",
+    )
+    parser.add_argument(
+        "--margin-cost",
+        type=float,
+        default=None,
+        metavar="PRICE",
+        help="融資均價（元）",
     )
     parser.add_argument(
         "--from-holdings",
@@ -895,6 +944,10 @@ def main(argv: list[str] | None = None) -> int:
             shares=shares,
             note=note,
             uses_margin=bool(args.margin),
+            cash_shares=args.cash_shares,
+            cash_avg_cost=args.cash_cost,
+            margin_shares=args.margin_shares,
+            margin_avg_cost=args.margin_cost,
             from_holdings_file=args.from_holdings,
         )
     except ValueError as exc:
@@ -906,9 +959,14 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_VALIDATION_FAILED
 
     print(f"CSV: {csv_path.resolve()}", file=sys.stderr)
-    margin_label = "融資" if holding.uses_margin else "現股"
+    legs = []
+    if holding.cash_shares > 0:
+        legs.append(f"現股 {holding.cash_shares:,}@{holding.cash_avg_cost}")
+    if holding.margin_shares > 0:
+        legs.append(f"融資 {holding.margin_shares:,}@{holding.margin_avg_cost}")
     print(
-        f"持股：均價 {holding.avg_cost} 元 × {holding.shares:,} 股（{margin_label}）",
+        f"持股：加權均價 {holding.avg_cost} 元 × {holding.shares:,} 股"
+        f"（{'；'.join(legs) if legs else '—'}）",
         file=sys.stderr,
     )
     return run_gate(

@@ -65,7 +65,8 @@ python3 .agents/skills/position-gate/position_gate.py --all-holdings
 - `reports/stock/{日期}/tw_stock_{代碼}_position.md`
 - `reports/stock/{日期}/tw_stock_{代碼}_position.pdf`（除非 `--skip-pdf`）
 - `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 撰寫市場面並作為事實驗證基準）
-- `reports/stock/{日期}/tw_stock_{代碼}.position.facts.json`（**harness 產物**：部位確定性試算——損益分桶、距損益兩平、均價 vs MA20、系統傾向）
+- `reports/stock/{日期}/tw_stock_{代碼}.position.facts.json`（**harness 產物**：部位確定性試算——損益分桶、距損益兩平、均價 vs MA20、融資維持率／距追繳／壓力 zone、系統傾向）
+- `reports/stock/{日期}/tw_stock_{代碼}.summary.json` 的 `position` 區塊含維持率欄位，供 report-site 融資卡顯示
 - `*.position.gate.log` 每輪含 `layers`（format / facts / position / reasoning）與 `issue_codes`
 
 ## Validation Criteria（分層 gate）
@@ -80,8 +81,12 @@ python3 .agents/skills/position-gate/position_gate.py --all-holdings
    - `position_profit_no_plan`：小幅獲利（3%~15%）未談加碼條件/停利/獲利回吐
    - `position_breakeven_no_trigger`：損益兩平（±3%）未給明確出場/加碼觸發條件
    - `position_loss_no_risk_control`：虧損（<-3%）未提停損/減碼/出場/攤平前提
+   - `position_margin_no_risk`：融資部位未談追繳／斷頭／維持率或融資減碼
+   - `position_maint_rate_mismatch`：正文維持率與系統試算相差逾 ±3pp
+   - `position_call_distance_ignored`：融資壓力 tight/critical 卻未點出追繳線／距追繳／追繳價或正確維持率
+   - `position_margin_pressure_unanchored`：接近追繳卻把技術反彈標成主線
 4. **推理層（共用）**：交叉對照須有籌碼依據；操作情境須有觸發條件；外資連續買賣須描述延續/轉折。
 
-- **Harness：** agy 依 `facts.json`（v2 含 chip_regime、法人共識、MA5/MA20 位置與短中線對齊等）與 `position.facts.json`（損益分桶、均價 vs MA20）撰寫報告。
+- **Harness：** agy 依 `facts.json`（v2 含 chip_regime、法人共識、MA5/MA20 位置與短中線對齊等）與 `position.facts.json`（損益分桶、均價 vs MA20、融資維持率／距追繳／壓力 zone）撰寫報告。
 - **Loop：** `build_fix_prompt` 依 `issue_codes` 給對應修正指引，並回饋部位狀態摘要。
 - **分桶門檻：** 於 `ui/position_signals.py` 頂部常數（`PROFIT_LARGE_PCT` 等）可調整停利/停損比例。

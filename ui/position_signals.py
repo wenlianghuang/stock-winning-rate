@@ -2,8 +2,9 @@
 
 Mirrors ``chip_signals`` but for the *position* dimension: Python owns the
 verdicts (profit/loss bucket, distance to breakeven, cost vs MA20, suggested
-bias, scenario weights), so the operation-scenario narrative can be mechanically
-gated on the actual holding — not just generic boilerplate.
+bias, scenario weights, margin maintenance / call distance), so the
+operation-scenario narrative can be mechanically gated on the actual holding —
+not just generic boilerplate.
 """
 
 from __future__ import annotations
@@ -19,6 +20,14 @@ PROFIT_LARGE_PCT = 15.0
 PROFIT_SMALL_PCT = 3.0
 LOSS_SMALL_PCT = -3.0
 LOSS_LARGE_PCT = -8.0
+
+# 融資單檔維持率估算（非券商整戶）。成數／追繳線可覆寫。
+DEFAULT_FINANCING_RATIO = 0.6
+DEFAULT_MARGIN_CALL_THRESHOLD_PCT = 130.0
+# 距追繳（維持率百分點）：>40 safe / >20 watch / >5 tight / else critical
+MARGIN_PRESSURE_SAFE_PP = 40.0
+MARGIN_PRESSURE_WATCH_PP = 20.0
+MARGIN_PRESSURE_TIGHT_PP = 5.0
 
 _ACTION_SECTION_KEYWORDS = ("操作情境", "操作", "情境")
 
@@ -77,6 +86,19 @@ MARGIN_RISK_KEYWORDS = (
     "融資追繳",
     "融资追缴",
 )
+# 融資壓力收緊時，須出現追繳距離／追繳價等錨點之一
+CALL_DISTANCE_KEYWORDS = (
+    "距追繳",
+    "追繳價",
+    "追繳線",
+    "接近追繳",
+    "低於追繳",
+    "瀕臨追繳",
+    "逼近追繳",
+    "觸及追繳",
+)
+MAINT_RATE_TOLERANCE_PP = 3.0
+CALL_DISTANCE_TOLERANCE_PP = 5.0
 _RISK_SECTION_KEYWORDS = ("風險", "纪律", "紀律")
 
 PNL_BUCKET_LABEL = {
@@ -94,6 +116,14 @@ POSITION_BIAS_LABEL = {
     "cautious": "偏向謹慎（虧損擴大須設防線）",
     "defensive": "偏向防禦（嚴守停損紀律）",
     "unknown": "資料不足",
+}
+
+MARGIN_PRESSURE_LABEL = {
+    "safe": "融資壓力寬鬆",
+    "watch": "融資壓力需盯",
+    "tight": "融資壓力收緊",
+    "critical": "融資接近追繳／已低於追繳線",
+    "unknown": "融資維持率無法試算",
 }
 
 SCENARIO_LABELS = {
@@ -126,6 +156,27 @@ TARGET_LEVEL_KEYWORDS = (
 )
 
 FactIssue = tuple[str, str]
+
+PRIORITY_LABEL = {
+    "cash_only": "僅現股部位",
+    "margin_only": "僅融資部位",
+    "margin_first": "優先處理融資腿（風險／虧損較急）",
+    "cash_first": "優先處理現股腿（權重較大）",
+    "balanced": "現股與融資並重，綜合調節",
+}
+
+_SYNTHESIS_KEYWORDS = (
+    "綜合",
+    "優先",
+    "兩邊",
+    "現股與融資",
+    "融資與現股",
+    "現股／融資",
+    "現股/融資",
+    "兩腿",
+)
+_CASH_SECTION_KEYWORDS = ("現股",)
+_MARGIN_SECTION_KEYWORDS = ("融資", "融资")
 
 
 @dataclass
@@ -165,8 +216,73 @@ class PositionFacts:
     take_profit_hint: str = ""
     required_action_hint: str = ""
     uses_margin: bool = False
+    leg: str = "combined"  # cash | margin | combined
+    # 融資單檔維持率估算（僅融資腿／含融資的綜合副本；現股為 unknown）
+    financing_ratio: float | None = None
+    margin_call_threshold_pct: float | None = None
+    maintenance_rate_pct: float | None = None
+    distance_to_call_pp: float | None = None  # 維持率 − 追繳線（百分點）
+    margin_call_price: float | None = None
+    distance_to_call_price_pct: float | None = None  # (close−call)/close×100
+    margin_pressure_zone: str = "unknown"  # safe|watch|tight|critical|unknown
     scenario_plan: ScenarioPlan | None = None
     anchors: list[str] = field(default_factory=list)
+
+    @property
+    def margin_pressure_label(self) -> str:
+        return MARGIN_PRESSURE_LABEL.get(
+            self.margin_pressure_zone, MARGIN_PRESSURE_LABEL["unknown"]
+        )
+
+
+@dataclass
+class DualPositionBundle:
+    combined: PositionFacts
+    cash: PositionFacts | None = None
+    margin: PositionFacts | None = None
+    priority: str = "balanced"
+    priority_label: str = ""
+    synthesis_hint: str = ""
+
+    @property
+    def uses_margin(self) -> bool:
+        return self.margin is not None and self.margin.shares > 0
+
+    @property
+    def unrealized_pnl_pct(self) -> float | None:
+        return self.combined.unrealized_pnl_pct
+
+    @property
+    def pnl_bucket(self) -> str:
+        return self.combined.pnl_bucket
+
+    @property
+    def position_bias(self) -> str:
+        return self.combined.position_bias
+
+    @property
+    def avg_cost(self) -> float:
+        return self.combined.avg_cost
+
+    @property
+    def shares(self) -> int:
+        return self.combined.shares
+
+    @property
+    def scenario_plan(self) -> ScenarioPlan | None:
+        return self.combined.scenario_plan
+
+    @property
+    def anchors(self) -> list[str]:
+        return self.combined.anchors
+
+    @property
+    def stock_id(self) -> str:
+        return self.combined.stock_id
+
+    @property
+    def stock_name(self) -> str:
+        return self.combined.stock_name
 
 
 def _to_float(raw: object) -> float | None:
@@ -302,6 +418,88 @@ def _position_bias(bucket: str) -> str:
         "loss_large": "defensive",
         "unknown": "unknown",
     }[bucket]
+
+
+def _margin_pressure_zone(distance_to_call_pp: float | None) -> str:
+    """Bucket personal margin pressure from distance-to-call (percentage points)."""
+    if distance_to_call_pp is None:
+        return "unknown"
+    if distance_to_call_pp > MARGIN_PRESSURE_SAFE_PP:
+        return "safe"
+    if distance_to_call_pp > MARGIN_PRESSURE_WATCH_PP:
+        return "watch"
+    if distance_to_call_pp > MARGIN_PRESSURE_TIGHT_PP:
+        return "tight"
+    return "critical"
+
+
+def compute_margin_maintenance(
+    *,
+    avg_cost: float,
+    close_price: float | None,
+    financing_ratio: float = DEFAULT_FINANCING_RATIO,
+    call_threshold_pct: float = DEFAULT_MARGIN_CALL_THRESHOLD_PCT,
+) -> dict[str, float | str | None]:
+    """Single-name TW margin estimate (not whole-account 整戶維持率).
+
+    維持率 ≈ close / (avg_cost × financing_ratio) × 100
+    追繳價 ≈ avg_cost × financing_ratio × (call_threshold / 100)
+    """
+    empty: dict[str, float | str | None] = {
+        "financing_ratio": None,
+        "margin_call_threshold_pct": None,
+        "maintenance_rate_pct": None,
+        "distance_to_call_pp": None,
+        "margin_call_price": None,
+        "distance_to_call_price_pct": None,
+        "margin_pressure_zone": "unknown",
+    }
+    if (
+        close_price is None
+        or close_price <= 0
+        or avg_cost <= 0
+        or financing_ratio <= 0
+        or call_threshold_pct <= 0
+    ):
+        return empty
+
+    loan_per_share = avg_cost * financing_ratio
+    maintenance_rate_pct = close_price / loan_per_share * 100.0
+    distance_to_call_pp = maintenance_rate_pct - call_threshold_pct
+    margin_call_price = loan_per_share * (call_threshold_pct / 100.0)
+    distance_to_call_price_pct = (close_price - margin_call_price) / close_price * 100.0
+    zone = _margin_pressure_zone(distance_to_call_pp)
+    return {
+        "financing_ratio": float(financing_ratio),
+        "margin_call_threshold_pct": float(call_threshold_pct),
+        "maintenance_rate_pct": round(maintenance_rate_pct, 2),
+        "distance_to_call_pp": round(distance_to_call_pp, 2),
+        "margin_call_price": round(margin_call_price, 2),
+        "distance_to_call_price_pct": round(distance_to_call_price_pct, 2),
+        "margin_pressure_zone": zone,
+    }
+
+
+def _apply_margin_pressure_bias(bias: str, zone: str) -> str:
+    """Tighten position bias when personal margin pressure rises."""
+    if zone == "critical":
+        return "defensive"
+    if zone == "tight":
+        if bias in {"protect_gains", "neutral", "unknown"}:
+            return "cautious"
+        return bias
+    return bias
+
+
+def _copy_margin_maintenance(target: PositionFacts, source: PositionFacts) -> None:
+    """Attach margin-leg maintenance metrics onto combined (for plan / prompt)."""
+    target.financing_ratio = source.financing_ratio
+    target.margin_call_threshold_pct = source.margin_call_threshold_pct
+    target.maintenance_rate_pct = source.maintenance_rate_pct
+    target.distance_to_call_pp = source.distance_to_call_pp
+    target.margin_call_price = source.margin_call_price
+    target.distance_to_call_price_pct = source.distance_to_call_price_pct
+    target.margin_pressure_zone = source.margin_pressure_zone
 
 
 def _required_action_hint(bucket: str, *, uses_margin: bool = False) -> str:
@@ -509,6 +707,23 @@ def build_scenario_plan(
             scores["range"] += 4
             scores["rebound"] -= 2
 
+    # 個人融資壓力（與市場面 margin_momentum / 券資比分開）
+    pressure = getattr(position_facts, "margin_pressure_zone", "unknown")
+    if getattr(position_facts, "uses_margin", False) and pressure != "unknown":
+        if pressure == "watch":
+            scores["continuation"] += 4
+            scores["rebound"] -= 2
+        elif pressure == "tight":
+            scores["continuation"] += 8
+            scores["rebound"] -= 5
+        elif pressure == "critical":
+            scores["continuation"] += 12
+            scores["rebound"] -= 8
+        # 市場融資升溫 + 個人壓力高 → 再收緊
+        if pressure in {"tight", "critical"} and margin_momentum == "heating":
+            scores["continuation"] += 3
+            scores["rebound"] -= 2
+
     if base_rates:
         from chip_signals import BASE_RATE_TILT_BAND, base_rate_forward_edge
 
@@ -561,6 +776,10 @@ def build_position_facts(
     chip_facts=None,
     base_rates: dict | None = None,
     uses_margin: bool = False,
+    leg: str = "combined",
+    with_scenario_plan: bool = True,
+    financing_ratio: float = DEFAULT_FINANCING_RATIO,
+    call_threshold_pct: float = DEFAULT_MARGIN_CALL_THRESHOLD_PCT,
 ) -> PositionFacts:
     close_price = _to_float(row.get("收盤價"))
     ma20 = _to_float(row.get("MA20"))
@@ -592,6 +811,26 @@ def build_position_facts(
     )
     bias = _position_bias(bucket)
 
+    margin_metrics: dict[str, float | str | None] = {
+        "financing_ratio": None,
+        "margin_call_threshold_pct": None,
+        "maintenance_rate_pct": None,
+        "distance_to_call_pp": None,
+        "margin_call_price": None,
+        "distance_to_call_price_pct": None,
+        "margin_pressure_zone": "unknown",
+    }
+    if uses_margin:
+        margin_metrics = compute_margin_maintenance(
+            avg_cost=avg_cost,
+            close_price=close_price,
+            financing_ratio=financing_ratio,
+            call_threshold_pct=call_threshold_pct,
+        )
+        bias = _apply_margin_pressure_bias(
+            bias, str(margin_metrics["margin_pressure_zone"])
+        )
+
     facts = PositionFacts(
         stock_id=stock_id,
         stock_name=stock_name,
@@ -611,18 +850,240 @@ def build_position_facts(
         breakeven_move_pct=round(breakeven_move, 2) if breakeven_move is not None else None,
         position_bias=bias,
         uses_margin=bool(uses_margin),
+        leg=leg,
+        financing_ratio=margin_metrics["financing_ratio"],  # type: ignore[arg-type]
+        margin_call_threshold_pct=margin_metrics["margin_call_threshold_pct"],  # type: ignore[arg-type]
+        maintenance_rate_pct=margin_metrics["maintenance_rate_pct"],  # type: ignore[arg-type]
+        distance_to_call_pp=margin_metrics["distance_to_call_pp"],  # type: ignore[arg-type]
+        margin_call_price=margin_metrics["margin_call_price"],  # type: ignore[arg-type]
+        distance_to_call_price_pct=margin_metrics["distance_to_call_price_pct"],  # type: ignore[arg-type]
+        margin_pressure_zone=str(margin_metrics["margin_pressure_zone"]),
         required_action_hint=_required_action_hint(bucket, uses_margin=bool(uses_margin)),
     )
-    if chip_facts is not None:
+    if with_scenario_plan and chip_facts is not None:
         facts.scenario_plan = build_scenario_plan(facts, chip_facts, base_rates)
     facts.anchors = _build_anchors(facts)
     return facts
+
+
+def _decide_priority(
+    cash: PositionFacts | None,
+    margin: PositionFacts | None,
+) -> tuple[str, str]:
+    if cash is None and margin is None:
+        return "balanced", PRIORITY_LABEL["balanced"]
+    if cash is None:
+        return "margin_only", PRIORITY_LABEL["margin_only"]
+    if margin is None:
+        return "cash_only", PRIORITY_LABEL["cash_only"]
+
+    margin_loss = margin.pnl_bucket in {"loss_small", "loss_large"}
+    cash_profit = cash.pnl_bucket in {"profit_small", "profit_large"}
+    if margin_loss or margin.position_bias in {"defensive", "cautious"}:
+        return "margin_first", PRIORITY_LABEL["margin_first"]
+    if cash_profit and margin.pnl_bucket == "breakeven":
+        return "cash_first", PRIORITY_LABEL["cash_first"]
+    if cash.shares >= margin.shares * 2 and not margin_loss:
+        return "cash_first", PRIORITY_LABEL["cash_first"]
+    if margin.shares >= cash.shares * 2:
+        return "margin_first", PRIORITY_LABEL["margin_first"]
+    return "balanced", PRIORITY_LABEL["balanced"]
+
+
+def _synthesis_hint(
+    priority: str,
+    cash: PositionFacts | None,
+    margin: PositionFacts | None,
+) -> str:
+    if priority == "cash_only" and cash is not None:
+        return f"僅現股：依現股損益（{PNL_BUCKET_LABEL[cash.pnl_bucket]}）操作"
+    if priority == "margin_only" and margin is not None:
+        pressure = ""
+        if margin.margin_pressure_zone not in {"unknown", "safe"}:
+            pressure = f"；{margin.margin_pressure_label}"
+        return (
+            f"僅融資：依融資損益（{PNL_BUCKET_LABEL[margin.pnl_bucket]}）操作，"
+            f"並嚴控追繳／減碼{pressure}"
+        )
+    cash_note = (
+        f"現股 {cash.shares:,} 股／{PNL_BUCKET_LABEL[cash.pnl_bucket]}"
+        if cash is not None
+        else "無現股"
+    )
+    margin_note = (
+        f"融資 {margin.shares:,} 股／{PNL_BUCKET_LABEL[margin.pnl_bucket]}"
+        if margin is not None
+        else "無融資"
+    )
+    return (
+        f"{PRIORITY_LABEL[priority]}。"
+        f"{cash_note}；{margin_note}。"
+        "綜合結論須說明優先處理哪一腿與理由"
+    )
+
+
+def build_dual_position_facts(
+    row: dict,
+    *,
+    stock_id: str,
+    stock_name: str,
+    cash_shares: int = 0,
+    cash_avg_cost: float | None = None,
+    margin_shares: int = 0,
+    margin_avg_cost: float | None = None,
+    combined_shares: int | None = None,
+    combined_avg_cost: float | None = None,
+    chip_facts=None,
+    base_rates: dict | None = None,
+    financing_ratio: float = DEFAULT_FINANCING_RATIO,
+    call_threshold_pct: float = DEFAULT_MARGIN_CALL_THRESHOLD_PCT,
+) -> DualPositionBundle:
+    cash: PositionFacts | None = None
+    margin: PositionFacts | None = None
+
+    if cash_shares > 0 and cash_avg_cost is not None and cash_avg_cost > 0:
+        cash = build_position_facts(
+            row,
+            stock_id=stock_id,
+            stock_name=stock_name,
+            avg_cost=float(cash_avg_cost),
+            shares=int(cash_shares),
+            chip_facts=chip_facts,
+            base_rates=base_rates,
+            uses_margin=False,
+            leg="cash",
+            with_scenario_plan=False,
+        )
+
+    if margin_shares > 0 and margin_avg_cost is not None and margin_avg_cost > 0:
+        margin = build_position_facts(
+            row,
+            stock_id=stock_id,
+            stock_name=stock_name,
+            avg_cost=float(margin_avg_cost),
+            shares=int(margin_shares),
+            chip_facts=chip_facts,
+            base_rates=base_rates,
+            uses_margin=True,
+            leg="margin",
+            with_scenario_plan=False,
+            financing_ratio=financing_ratio,
+            call_threshold_pct=call_threshold_pct,
+        )
+
+    if combined_shares is None or combined_avg_cost is None:
+        total = (cash_shares or 0) + (margin_shares or 0)
+        if total <= 0:
+            raise ValueError("現股與融資股數合計須 > 0")
+        cash_value = float(cash_shares or 0) * float(cash_avg_cost or 0)
+        margin_value = float(margin_shares or 0) * float(margin_avg_cost or 0)
+        combined_shares = total
+        combined_avg_cost = (cash_value + margin_value) / total
+
+    combined = build_position_facts(
+        row,
+        stock_id=stock_id,
+        stock_name=stock_name,
+        avg_cost=float(combined_avg_cost),
+        shares=int(combined_shares),
+        chip_facts=chip_facts,
+        base_rates=base_rates,
+        # 綜合腿損益用加權均價；維持率不可用加權均價估算
+        uses_margin=False,
+        leg="combined",
+        with_scenario_plan=False,
+    )
+    if margin is not None:
+        combined.uses_margin = True
+        combined.required_action_hint = _required_action_hint(
+            combined.pnl_bucket, uses_margin=True
+        )
+        _copy_margin_maintenance(combined, margin)
+        combined.position_bias = _apply_margin_pressure_bias(
+            combined.position_bias, margin.margin_pressure_zone
+        )
+    if margin is not None and margin.position_bias == "defensive":
+        combined.position_bias = "defensive"
+    elif margin is not None and margin.position_bias == "cautious":
+        if combined.position_bias in {"neutral", "protect_gains"}:
+            combined.position_bias = "cautious"
+    if chip_facts is not None:
+        combined.scenario_plan = build_scenario_plan(combined, chip_facts, base_rates)
+    combined.anchors = _build_anchors(combined)
+
+    priority, priority_label = _decide_priority(cash, margin)
+    synthesis = _synthesis_hint(priority, cash, margin)
+    combined.anchors = [
+        f"綜合優先序：{priority_label}",
+        *combined.anchors,
+    ]
+
+    return DualPositionBundle(
+        combined=combined,
+        cash=cash,
+        margin=margin,
+        priority=priority,
+        priority_label=priority_label,
+        synthesis_hint=synthesis,
+    )
+
+
+def dual_position_facts_summary_for_prompt(bundle: DualPositionBundle) -> str:
+    lines = [
+        "【部位狀態（現股／融資分腿 + 綜合；操作情境須對齊）】",
+        f"- 綜合優先序：{bundle.priority_label}",
+        f"- 綜合提示：{bundle.synthesis_hint}",
+        "",
+        "【綜合部位（加權均價，情境權重以此為準）】",
+    ]
+    combined_summary = position_facts_summary_for_prompt(bundle.combined)
+    lines.append(
+        combined_summary.replace(
+            "【部位狀態（系統試算，操作情境須對齊此狀態）】\n",
+            "",
+        )
+    )
+
+    if bundle.cash is not None:
+        lines.extend(["", "【現股腿】"])
+        cash_summary = position_facts_summary_for_prompt(bundle.cash)
+        lines.append(
+            cash_summary.replace(
+                "【部位狀態（系統試算，操作情境須對齊此狀態）】\n",
+                "",
+            )
+        )
+    if bundle.margin is not None:
+        lines.extend(["", "【融資腿】"])
+        margin_summary = position_facts_summary_for_prompt(bundle.margin)
+        lines.append(
+            margin_summary.replace(
+                "【部位狀態（系統試算，操作情境須對齊此狀態）】\n",
+                "",
+            )
+        )
+    return "\n".join(lines)
 
 
 def _build_anchors(facts: PositionFacts) -> list[str]:
     anchors: list[str] = []
     if facts.uses_margin:
         anchors.append("此部位使用融資（須留意追繳／斷頭與減碼防禦）")
+        if facts.maintenance_rate_pct is not None and facts.distance_to_call_pp is not None:
+            anchors.append(
+                f"融資維持率約 {facts.maintenance_rate_pct:.1f}%"
+                f"（距追繳 {facts.distance_to_call_pp:+.1f}pp；"
+                f"{facts.margin_pressure_label}；單檔估算非整戶）"
+            )
+            if facts.margin_call_price is not None:
+                anchors.append(
+                    f"估算追繳價約 {_fmt_price(facts.margin_call_price)}"
+                    + (
+                        f"（現價相對追繳價約 {facts.distance_to_call_price_pct:+.1f}%）"
+                        if facts.distance_to_call_price_pct is not None
+                        else ""
+                    )
+                )
     if facts.unrealized_pnl_pct is not None:
         anchors.append(
             f"未實現損益 {facts.unrealized_pnl_pct:+.2f}%"
@@ -680,7 +1141,10 @@ def scenario_plan_summary_for_prompt(plan: ScenarioPlan) -> str:
             f"→ 建議操作：{item.action}"
         )
         lines.append(f"  觸發參考：{item.trigger_hint}")
-    lines.append("- 正文須依上述權重撰寫三種市場情境，並標示百分比與主線")
+    lines.append(
+        "- 正文須依上述權重撰寫三種市場情境；標題格式為 "
+        "`### 主線：…（%）`／`### 次線：…`／`### 尾線：…`，並標示百分比"
+    )
     return "\n".join(lines)
 
 
@@ -691,6 +1155,37 @@ def position_facts_summary_for_prompt(facts: PositionFacts) -> str:
     lines.append(
         f"- 是否使用融資：{'是（融資部位）' if facts.uses_margin else '否（現股）'}"
     )
+    if (
+        facts.uses_margin
+        and facts.maintenance_rate_pct is not None
+        and facts.distance_to_call_pp is not None
+    ):
+        ratio = facts.financing_ratio if facts.financing_ratio is not None else DEFAULT_FINANCING_RATIO
+        threshold = (
+            facts.margin_call_threshold_pct
+            if facts.margin_call_threshold_pct is not None
+            else DEFAULT_MARGIN_CALL_THRESHOLD_PCT
+        )
+        lines.append(
+            f"- 融資維持率（單檔估算）：約 {facts.maintenance_rate_pct:.1f}%"
+            f"（成數 {ratio:.0%}、追繳線 {threshold:.0f}%）"
+        )
+        lines.append(
+            f"- 距追繳：維持率空間 {facts.distance_to_call_pp:+.1f}pp"
+            f"（{facts.margin_pressure_label}）"
+        )
+        if facts.margin_call_price is not None:
+            price_gap = (
+                f"，現價相對追繳價約 {facts.distance_to_call_price_pct:+.1f}%"
+                if facts.distance_to_call_price_pct is not None
+                else ""
+            )
+            lines.append(
+                f"- 估算追繳價：約 {_fmt_price(facts.margin_call_price)}{price_gap}"
+            )
+        lines.append(
+            "- 註：以上為單檔簡化估算，非券商整戶維持率；敘事可引用數字但勿改寫"
+        )
     if facts.unrealized_pnl_pct is not None:
         lines.append(
             f"- 未實現損益：{facts.unrealized_pnl_pct:+.2f}%"
@@ -742,6 +1237,27 @@ def _price_mentioned(text: str, price: float | None) -> bool:
         _fmt_price(price),
     }
     return any(candidate and candidate in normalized for candidate in candidates)
+
+
+def _margin_call_price_mentioned(text: str, price: float | None) -> bool:
+    """Stricter than ``_price_mentioned``: avoid colliding with 20日高/低整數價."""
+    if price is None or price <= 0:
+        return False
+    normalized = text.replace(",", "")
+    precise = {f"{price:.2f}", f"{price:.1f}", _fmt_price(price)}
+    if any(candidate and candidate in normalized for candidate in precise):
+        return True
+    # 整數價僅在「追繳」鄰近上下文才算命中
+    rounded = str(int(round(price)))
+    if rounded not in normalized:
+        return False
+    for match in re.finditer(re.escape(rounded), normalized):
+        start = max(0, match.start() - 12)
+        end = min(len(normalized), match.end() + 12)
+        window = normalized[start:end]
+        if "追繳" in window or "斷頭" in window:
+            return True
+    return False
 
 
 def _mentions_stop_level(text: str, facts: PositionFacts) -> bool:
@@ -827,23 +1343,24 @@ def _check_scenario_plan(region: str, facts: PositionFacts) -> list[FactIssue]:
     return issues
 
 
-def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssue]:
-    """Bucket-aware position-decision checks as ``(code, message)`` tuples."""
-    if facts is None or facts.unrealized_pnl_pct is None:
+def _run_bucket_checks(region: str, facts: PositionFacts) -> list[FactIssue]:
+    """Bucket-aware checks on a text region for one leg."""
+    if facts.unrealized_pnl_pct is None:
         return []
 
-    text = body.strip()
-    action_region = _slice_after_keywords(text, _ACTION_SECTION_KEYWORDS)
-    region = action_region if action_region.strip() else text
-    bucket = facts.pnl_bucket
     issues: list[FactIssue] = []
+    bucket = facts.pnl_bucket
+    leg_prefix = {
+        "cash": "現股",
+        "margin": "融資",
+        "combined": "部位",
+    }.get(facts.leg, "部位")
 
     if not _contains_any(region, POSITION_CONTEXT_KEYWORDS):
         issues.append(
             (
                 "position_scenario_unanchored",
-                "操作情境未錨定部位損益（須提及獲利/虧損/成本/均價/套牢等），"
-                "而非泛泛而談",
+                f"{leg_prefix}操作情境未錨定部位損益（須提及獲利/虧損/成本/均價/套牢等）",
             )
         )
 
@@ -852,8 +1369,8 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_profit_no_protection",
-                    f"部位已大幅獲利（{facts.unrealized_pnl_pct:+.1f}%），"
-                    "操作情境須提出停利/移動停損/獲利了結，或明確論證續抱理由",
+                    f"{leg_prefix}已大幅獲利（{facts.unrealized_pnl_pct:+.1f}%），"
+                    "須提出停利/移動停損/獲利了結，或明確論證續抱理由",
                 )
             )
         elif facts.technical_target_price is not None and not _mentions_target_level(
@@ -862,8 +1379,8 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_target_level_missing",
-                    f"系統停利參考為近20日高 {_fmt_price(facts.technical_target_price)}，"
-                    "操作情境須引用該價位或近20日高/壓力區",
+                    f"{leg_prefix}系統停利參考為近20日高 {_fmt_price(facts.technical_target_price)}，"
+                    "須引用該價位或近20日高/壓力區",
                 )
             )
     elif bucket == "profit_small":
@@ -871,8 +1388,8 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_profit_no_plan",
-                    f"部位小幅獲利（{facts.unrealized_pnl_pct:+.1f}%），"
-                    "操作情境須討論加碼條件/停利/續抱或獲利回吐風險",
+                    f"{leg_prefix}小幅獲利（{facts.unrealized_pnl_pct:+.1f}%），"
+                    "須討論加碼條件/停利/續抱或獲利回吐風險",
                 )
             )
     elif bucket == "breakeven":
@@ -883,7 +1400,7 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_breakeven_no_trigger",
-                    "部位接近損益兩平，操作情境須給出明確的出場或加碼觸發條件",
+                    f"{leg_prefix}接近損益兩平，須給出明確的出場或加碼觸發條件",
                 )
             )
     elif bucket in {"loss_small", "loss_large"}:
@@ -891,8 +1408,8 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_loss_no_risk_control",
-                    f"部位未實現損益約 {facts.unrealized_pnl_pct:.1f}%（虧損），"
-                    "操作情境須提出停損/減碼/出場等具體防禦手段",
+                    f"{leg_prefix}未實現損益約 {facts.unrealized_pnl_pct:.1f}%（虧損），"
+                    "須提出停損/減碼/出場等具體防禦手段",
                 )
             )
         elif facts.technical_stop_price is not None and not _mentions_stop_level(
@@ -901,46 +1418,363 @@ def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssu
             issues.append(
                 (
                     "position_stop_level_missing",
-                    f"系統停損參考為近20日低 {_fmt_price(facts.technical_stop_price)}，"
-                    "操作情境須引用該價位或近20日低/前低",
+                    f"{leg_prefix}系統停損參考為近20日低 {_fmt_price(facts.technical_stop_price)}，"
+                    "須引用該價位或近20日低/前低",
                 )
             )
         elif facts.take_profit_hint and not _mentions_target_level(region, facts):
             issues.append(
                 (
                     "position_target_level_missing",
-                    f"虧損部位須提及解套參考（均價 {_fmt_price(facts.avg_cost)}）"
+                    f"{leg_prefix}虧損須提及解套參考（均價 {_fmt_price(facts.avg_cost)}）"
                     "或上方壓力區",
                 )
             )
+    return issues
 
-    issues.extend(_check_scenario_plan(region, facts))
 
-    if facts.uses_margin:
-        risk_region = _slice_after_keywords(text, _RISK_SECTION_KEYWORDS)
-        margin_scope = (
-            f"{risk_region}\n{region}" if risk_region.strip() else text
+def _margin_risk_issues(text: str, region: str) -> list[FactIssue]:
+    risk_region = _slice_after_keywords(text, _RISK_SECTION_KEYWORDS)
+    margin_scope = f"{risk_region}\n{region}" if risk_region.strip() else text
+    has_explicit_margin_risk = _contains_any(margin_scope, MARGIN_RISK_KEYWORDS)
+    has_margin_and_defense = ("融資" in margin_scope or "融资" in margin_scope) and (
+        _contains_any(margin_scope, ("減碼", "停損", "出場", "認賠"))
+    )
+    if has_explicit_margin_risk or has_margin_and_defense:
+        return []
+    return [
+        (
+            "position_margin_no_risk",
+            "融資腿存在時，操作情境或風險提醒須談追繳／斷頭／維持率，"
+            "或明確提出融資減碼／停損防禦",
         )
-        has_explicit_margin_risk = _contains_any(margin_scope, MARGIN_RISK_KEYWORDS)
-        has_margin_and_defense = ("融資" in margin_scope or "融资" in margin_scope) and (
-            _contains_any(margin_scope, ("減碼", "停損", "出場", "認賠"))
+    ]
+
+
+def _extract_maint_rate_claims(text: str) -> list[float]:
+    """Numbers explicitly tied to 維持率 (avoid random % elsewhere)."""
+    patterns = (
+        r"維持率[^%\d]{0,20}约?\s*約?\s*(\d{2,3}(?:\.\d+)?)\s*%",
+        r"维持率[^%\d]{0,20}约?\s*約?\s*(\d{2,3}(?:\.\d+)?)\s*%",
+        r"維持率[^%\d]{0,20}约?\s*約?\s*(\d{2,3}(?:\.\d+)?)",
+        r"维持率[^%\d]{0,20}约?\s*約?\s*(\d{2,3}(?:\.\d+)?)",
+    )
+    found: list[float] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            try:
+                value = float(match.group(1))
+            except ValueError:
+                continue
+            # 維持率合理區間；排除成數 60 這類誤抓時仍可能進來，靠容差比對
+            if 50.0 <= value <= 500.0:
+                found.append(value)
+    return found
+
+
+def _extract_call_distance_pp_claims(text: str) -> list[float]:
+    """Extract 維持率空間（pp），勿與「現價相對追繳價 %」混淆。"""
+    # 先遮罩價格距離用語，避免「現價距追繳約 +20.4%」被當成 pp
+    masked = re.sub(
+        r"現價(?:距追繳|相對追繳價)[^%\n]{0,30}[+\-]?\d+(?:\.\d+)?\s*%",
+        " ",
+        text,
+    )
+    patterns = (
+        # 必須帶 pp／百分點；禁止把 % 當成 pp
+        r"(?<!現價)距追繳[^%\d+\-]{0,24}([+\-]?\d+(?:\.\d+)?)\s*(?:pp|PP|百分點)",
+        r"維持率空間[^%\d+\-]{0,16}([+\-]?\d+(?:\.\d+)?)\s*(?:pp|PP|百分點)?",
+    )
+    found: list[float] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, masked):
+            try:
+                found.append(float(match.group(1)))
+            except ValueError:
+                continue
+    return found
+
+
+def _extract_call_price_gap_claims(text: str) -> list[float]:
+    """Extract 現價相對追繳價（%）。"""
+    patterns = (
+        r"現價距追繳[^%\d+\-]{0,20}([+\-]?\d+(?:\.\d+)?)\s*%",
+        r"現價相對追繳價[^%\d+\-]{0,20}([+\-]?\d+(?:\.\d+)?)\s*%",
+    )
+    found: list[float] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            try:
+                found.append(float(match.group(1)))
+            except ValueError:
+                continue
+    return found
+
+
+def _margin_maintenance_issues(
+    text: str, region: str, facts: PositionFacts
+) -> list[FactIssue]:
+    """Numeric / pressure-zone gates on top of keyword margin risk."""
+    if not facts.uses_margin or facts.margin_pressure_zone == "unknown":
+        return []
+    if facts.maintenance_rate_pct is None:
+        return []
+
+    risk_region = _slice_after_keywords(text, _RISK_SECTION_KEYWORDS)
+    scope = f"{risk_region}\n{region}" if risk_region.strip() else text
+    if not scope.strip():
+        scope = text
+    issues: list[FactIssue] = []
+    expected_rate = float(facts.maintenance_rate_pct)
+    zone = facts.margin_pressure_zone
+
+    rate_claims = _extract_maint_rate_claims(scope)
+    if rate_claims and not any(
+        abs(claimed - expected_rate) <= MAINT_RATE_TOLERANCE_PP for claimed in rate_claims
+    ):
+        claimed = rate_claims[0]
+        issues.append(
+            (
+                "position_maint_rate_mismatch",
+                f"正文維持率約 {claimed:g}% 與系統試算 {expected_rate:.1f}% "
+                f"相差超過 ±{MAINT_RATE_TOLERANCE_PP:.0f}pp，請改用系統數字"
+                "（單檔估算）",
+            )
         )
-        if not (has_explicit_margin_risk or has_margin_and_defense):
+
+    if facts.distance_to_call_pp is not None:
+        expected_dist = float(facts.distance_to_call_pp)
+        dist_claims = _extract_call_distance_pp_claims(scope)
+        if dist_claims and not any(
+            abs(claimed - expected_dist) <= CALL_DISTANCE_TOLERANCE_PP
+            for claimed in dist_claims
+        ):
+            claimed = dist_claims[0]
             issues.append(
                 (
-                    "position_margin_no_risk",
-                    "此部位標示為融資，操作情境或風險提醒須談追繳／斷頭／維持率，"
-                    "或明確提出融資減碼／停損防禦",
+                    "position_call_distance_mismatch",
+                    f"正文距追繳約 {claimed:g}pp 與系統試算 {expected_dist:+.1f}pp "
+                    f"相差超過 ±{CALL_DISTANCE_TOLERANCE_PP:.0f}pp，請改用系統數字",
+                )
+            )
+
+    if facts.distance_to_call_price_pct is not None:
+        expected_gap = float(facts.distance_to_call_price_pct)
+        gap_claims = _extract_call_price_gap_claims(scope)
+        if gap_claims and not any(
+            abs(claimed - expected_gap) <= CALL_DISTANCE_TOLERANCE_PP
+            for claimed in gap_claims
+        ):
+            claimed = gap_claims[0]
+            issues.append(
+                (
+                    "position_call_distance_mismatch",
+                    f"正文「現價相對追繳價」約 {claimed:g}% 與系統試算 "
+                    f"{expected_gap:+.1f}% 相差超過 ±{CALL_DISTANCE_TOLERANCE_PP:.0f}%，"
+                    "請改用系統數字（勿與維持率空間 pp 混淆）",
+                )
+            )
+
+    if zone in {"tight", "critical"}:
+        has_call_anchor = (
+            _contains_any(scope, CALL_DISTANCE_KEYWORDS)
+            or _margin_call_price_mentioned(scope, facts.margin_call_price)
+            or any(
+                abs(c - expected_rate) <= MAINT_RATE_TOLERANCE_PP
+                for c in _extract_maint_rate_claims(scope)
+            )
+            or (
+                facts.distance_to_call_pp is not None
+                and any(
+                    abs(c - float(facts.distance_to_call_pp)) <= CALL_DISTANCE_TOLERANCE_PP
+                    for c in _extract_call_distance_pp_claims(scope)
+                )
+            )
+        )
+        if not has_call_anchor:
+            call_price_note = (
+                f"或追繳價 {_fmt_price(facts.margin_call_price)}"
+                if facts.margin_call_price is not None
+                else ""
+            )
+            dist_note = (
+                f"距追繳 {facts.distance_to_call_pp:+.1f}pp"
+                if facts.distance_to_call_pp is not None
+                else "距追繳空間"
+            )
+            issues.append(
+                (
+                    "position_call_distance_ignored",
+                    f"融資壓力為「{facts.margin_pressure_label}」，"
+                    f"須點出追繳線／{dist_note}{call_price_note}，"
+                    f"或引用系統維持率 {expected_rate:.1f}%",
+                )
+            )
+
+    if zone == "critical":
+        plan = facts.scenario_plan
+        primary_id = plan.primary_id if plan is not None else None
+        rebound_as_main = bool(
+            re.search(
+                r"(主線[:：].{0,12}技術反彈|技術反彈.{0,12}（?主線|主線.{0,20}技術反彈)",
+                scope,
+            )
+        )
+        if rebound_as_main and primary_id != "rebound":
+            issues.append(
+                (
+                    "position_margin_pressure_unanchored",
+                    "融資接近追繳時不可把「技術反彈」標成主線；"
+                    "請對齊系統主線（多為延續調節）並強調減碼／防禦",
+                )
+            )
+        elif primary_id == "rebound":
+            # 權重極端情況仍主線反彈時，敘事至少須防禦
+            if not _contains_any(scope, ("減碼", "停損", "追繳", "斷頭", "防禦")):
+                issues.append(
+                    (
+                        "position_margin_pressure_unanchored",
+                        "融資接近追繳，即使討論反彈也須同時強調追繳／減碼防禦",
+                    )
+                )
+
+    return issues
+
+
+def run_position_checks(body: str, facts: PositionFacts | None) -> list[FactIssue]:
+    """Bucket-aware position-decision checks as ``(code, message)`` tuples."""
+    if facts is None or facts.unrealized_pnl_pct is None:
+        return []
+
+    text = body.strip()
+    action_region = _slice_after_keywords(text, _ACTION_SECTION_KEYWORDS)
+    region = action_region if action_region.strip() else text
+    issues = _run_bucket_checks(region, facts)
+    issues.extend(_check_scenario_plan(region, facts))
+    if facts.uses_margin:
+        issues.extend(_margin_risk_issues(text, region))
+        issues.extend(_margin_maintenance_issues(text, region, facts))
+    return issues
+
+
+def _has_heading_with_keywords(text: str, keywords: tuple[str, ...]) -> bool:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^##\s+", stripped) and any(k in stripped for k in keywords):
+            return True
+    return False
+
+
+def _leg_check_scope(
+    text: str, action_region: str, keywords: tuple[str, ...]
+) -> str:
+    """Resolve scope for one leg's bucket checks.
+
+    Prefer ``## 現股`` / ``## 融資`` headings. Otherwise use the whole
+    action/scenario chapter when it mentions the leg — so early「現股／融資」
+    in 部位現況 does not starve stop-level checks under 操作情境, and so
+    the keyword line itself (often containing 近20日低) is included.
+    """
+    if _has_heading_with_keywords(text, keywords):
+        sliced = _slice_after_keywords(text, keywords)
+        if sliced.strip():
+            return sliced
+
+    if action_region.strip() and any(k in action_region for k in keywords):
+        return action_region
+
+    fallback = _slice_after_keywords(text, keywords)
+    if fallback.strip():
+        return fallback
+    return action_region if action_region.strip() else text
+
+
+def run_dual_position_checks(
+    body: str, bundle: DualPositionBundle | None
+) -> list[FactIssue]:
+    """Checks for cash/margin legs + combined scenario plan + synthesis."""
+    if bundle is None or bundle.combined.unrealized_pnl_pct is None:
+        return []
+
+    text = body.strip()
+    action_region = _slice_after_keywords(text, _ACTION_SECTION_KEYWORDS)
+    region = action_region if action_region.strip() else text
+    issues: list[FactIssue] = []
+
+    # Combined market-scenario weights (always)
+    issues.extend(_check_scenario_plan(region, bundle.combined))
+
+    both_legs = bundle.cash is not None and bundle.margin is not None
+
+    if bundle.cash is not None:
+        cash_region = _leg_check_scope(text, region, _CASH_SECTION_KEYWORDS)
+        if both_legs and "現股" not in text:
+            issues.append(
+                (
+                    "position_cash_section_missing",
+                    "同時持有現股與融資時，正文須有「現股」專段對齊現股損益",
+                )
+            )
+        else:
+            issues.extend(_run_bucket_checks(cash_region, bundle.cash))
+
+    if bundle.margin is not None:
+        margin_region = _leg_check_scope(text, region, _MARGIN_SECTION_KEYWORDS)
+        if both_legs and "融資" not in text and "融资" not in text:
+            issues.append(
+                (
+                    "position_margin_section_missing",
+                    "同時持有現股與融資時，正文須有「融資」專段對齊融資損益",
+                )
+            )
+        else:
+            issues.extend(_run_bucket_checks(margin_region, bundle.margin))
+        issues.extend(_margin_risk_issues(text, margin_region))
+        # 維持率／壓力以 combined（已複製融資腿數字 + 情境權重）為準
+        issues.extend(_margin_maintenance_issues(text, region, bundle.combined))
+
+    if both_legs:
+        synth_region = _slice_after_keywords(text, ("綜合", "優先"))
+        synth_scope = synth_region if synth_region.strip() else text
+        if not _contains_any(synth_scope, _SYNTHESIS_KEYWORDS):
+            issues.append(
+                (
+                    "position_synthesis_missing",
+                    "現股與融資同時存在時，須有綜合結論（優先序／兩邊如何取捨）",
+                )
+            )
+        elif bundle.priority == "margin_first" and not _contains_any(
+            synth_scope, ("融資", "融资", "優先")
+        ):
+            issues.append(
+                (
+                    "position_synthesis_priority_mismatch",
+                    f"系統優先序為「{bundle.priority_label}」，綜合結論須點出優先處理融資",
                 )
             )
 
     return issues
 
 
-def write_position_facts_json(path, facts: PositionFacts) -> None:
+def write_position_facts_json(path, facts: PositionFacts | DualPositionBundle) -> None:
     from pathlib import Path
 
+    if isinstance(facts, DualPositionBundle):
+        payload = {
+            "version": 2,
+            "priority": facts.priority,
+            "priority_label": facts.priority_label,
+            "synthesis_hint": facts.synthesis_hint,
+            "combined": asdict(facts.combined),
+            "cash": asdict(facts.cash) if facts.cash is not None else None,
+            "margin": asdict(facts.margin) if facts.margin is not None else None,
+            # Flat combined fields for older readers
+            **asdict(facts.combined),
+        }
+    else:
+        payload = asdict(facts)
+
     Path(path).write_text(
-        json.dumps(asdict(facts), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )

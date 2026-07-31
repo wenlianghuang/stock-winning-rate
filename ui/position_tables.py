@@ -14,6 +14,12 @@ from chip_tables import (
     merge_report_body,
 )
 from position_prompts import HoldingInfo
+from position_signals import (
+    DEFAULT_FINANCING_RATIO,
+    DEFAULT_MARGIN_CALL_THRESHOLD_PCT,
+    MARGIN_PRESSURE_LABEL,
+    compute_margin_maintenance,
+)
 
 
 def _fmt_num(value: float, *, signed: bool = False) -> str:
@@ -59,11 +65,62 @@ def build_position_summary_markdown(
     ma20_dev = str(row.get("收盤偏離MA20_%", "")).strip()
 
     rows: list[list[str]] = [
-        ["持股均價（元）", _fmt_num(holding.avg_cost)],
-        ["持股股數", _fmt_num(float(holding.shares))],
-        ["是否融資", "是" if holding.uses_margin else "否"],
-        ["收盤價（元）", _fmt_num(close_price) if close_price is not None else "—"],
+        ["總持股（股）", _fmt_num(float(holding.shares))],
+        ["加權均價（元）", _fmt_num(holding.avg_cost)],
     ]
+    if holding.cash_shares > 0 and holding.cash_avg_cost is not None:
+        rows.append(["現股股數", _fmt_num(float(holding.cash_shares))])
+        rows.append(["現股均價（元）", _fmt_num(holding.cash_avg_cost)])
+    if holding.margin_shares > 0 and holding.margin_avg_cost is not None:
+        rows.append(["融資股數", _fmt_num(float(holding.margin_shares))])
+        rows.append(["融資均價（元）", _fmt_num(holding.margin_avg_cost)])
+    rows.append(["是否融資", "是" if holding.uses_margin else "否"])
+    if holding.uses_margin and close_price is not None:
+        margin_cost = (
+            float(holding.margin_avg_cost)
+            if holding.margin_shares > 0 and holding.margin_avg_cost is not None
+            else float(holding.avg_cost)
+        )
+        maint = compute_margin_maintenance(
+            avg_cost=margin_cost,
+            close_price=close_price,
+        )
+        if maint["maintenance_rate_pct"] is not None:
+            zone = str(maint["margin_pressure_zone"])
+            zone_label = MARGIN_PRESSURE_LABEL.get(zone, zone)
+            ratio = maint["financing_ratio"] or DEFAULT_FINANCING_RATIO
+            threshold = (
+                maint["margin_call_threshold_pct"] or DEFAULT_MARGIN_CALL_THRESHOLD_PCT
+            )
+            rows.append(
+                [
+                    "融資維持率（單檔估算）",
+                    f"{maint['maintenance_rate_pct']:.1f}%（成數 {float(ratio):.0%}／追繳線 {float(threshold):.0f}%）",
+                ]
+            )
+            rows.append(
+                [
+                    "距追繳",
+                    f"{float(maint['distance_to_call_pp']):+.1f}pp（{zone_label}）",
+                ]
+            )
+            if maint["margin_call_price"] is not None:
+                price_gap = maint["distance_to_call_price_pct"]
+                gap_note = (
+                    f"；現價相對追繳價 {float(price_gap):+.1f}%"
+                    if price_gap is not None
+                    else ""
+                )
+                rows.append(
+                    [
+                        "估算追繳價",
+                        f"{_fmt_num(float(maint['margin_call_price']))}{gap_note}",
+                    ]
+                )
+            rows.append(["維持率註記", "單檔簡化估算，非券商整戶維持率"])
+    rows.append(
+        ["收盤價（元）", _fmt_num(close_price) if close_price is not None else "—"]
+    )
     if pnl_pct is not None:
         rows.append(["未實現損益", f"{pnl_pct:+.2f}%"])
         cost_diff = (close_price or 0) - holding.avg_cost

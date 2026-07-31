@@ -62,21 +62,10 @@ def _section_present(body: str, keywords: tuple[str, ...]) -> bool:
 
 
 def _slice_after_keywords(body: str, keywords: tuple[str, ...]) -> str:
-    lines = body.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        if any(keyword in line for keyword in keywords):
-            start = index + 1
-            break
-    if start is None:
-        return ""
+    """Prefer ``##`` headings so inline「風險／紀律」in 部位現況 does not steal the slice."""
+    from fact_checks import _slice_after_keywords as _shared_slice
 
-    chunk: list[str] = []
-    for line in lines[start:]:
-        if chunk and re.match(r"^##\s+", line.strip()):
-            break
-        chunk.append(line)
-    return "\n".join(chunk)
+    return _shared_slice(body, keywords)
 
 
 # 市場面段落關鍵字（供事實方向檢查鎖定；勿含「部位現況」以免誤鎖前段）
@@ -100,17 +89,20 @@ def _build_position_facts(
     row: dict[str, str], holding: HoldingRecord, chip_facts=None
 ):
     from chip_signals import load_base_rates
-    from position_signals import build_position_facts
+    from position_signals import build_dual_position_facts
 
-    return build_position_facts(
+    return build_dual_position_facts(
         row,
         stock_id=str(row.get("代碼", holding.stock_id)).strip(),
         stock_name=str(row.get("名稱", holding.stock_id)).strip(),
-        avg_cost=holding.avg_cost,
-        shares=holding.shares,
+        cash_shares=holding.cash_shares,
+        cash_avg_cost=holding.cash_avg_cost,
+        margin_shares=holding.margin_shares,
+        margin_avg_cost=holding.margin_avg_cost,
+        combined_shares=holding.shares,
+        combined_avg_cost=holding.avg_cost,
         chip_facts=chip_facts,
         base_rates=load_base_rates(),
-        uses_margin=holding.uses_margin,
     )
 
 
@@ -121,13 +113,21 @@ def _position_decision_issues(
     position_facts=None,
     chip_facts=None,
 ) -> list[ValidationIssue]:
-    """部位分桶決策一致性：依損益分桶要求對應的操作內容。"""
-    from position_signals import run_position_checks
+    """部位分桶決策一致性：依現股／融資分腿與綜合優先序驗證。"""
+    from position_signals import DualPositionBundle, run_dual_position_checks
 
     pfacts = position_facts or _build_position_facts(row, holding, chip_facts=chip_facts)
+    if not isinstance(pfacts, DualPositionBundle):
+        # Backward compat if a flat PositionFacts is passed
+        from position_signals import run_position_checks
+
+        return [
+            ValidationIssue(code, message)
+            for code, message in run_position_checks(body, pfacts)
+        ]
     return [
         ValidationIssue(code, message)
-        for code, message in run_position_checks(body, pfacts)
+        for code, message in run_dual_position_checks(body, pfacts)
     ]
 
 

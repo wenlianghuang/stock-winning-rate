@@ -9,7 +9,7 @@ from typing import Any
 
 from fact_checks import _slice_after_keywords
 
-SUMMARY_VERSION = 1
+SUMMARY_VERSION = 2
 
 MARKET_SECTIONS = {
     "today_chip": ("當日籌碼", "籌碼解讀"),
@@ -422,7 +422,11 @@ def build_market_summary(
 
 
 def build_position_summary(position_facts, body: str) -> dict[str, Any]:
-    from position_signals import PNL_BUCKET_LABEL, POSITION_BIAS_LABEL
+    from position_signals import (
+        DualPositionBundle,
+        PNL_BUCKET_LABEL,
+        POSITION_BIAS_LABEL,
+    )
 
     status_section = _slice_after_keywords(body, POSITION_SECTIONS["position_status"])
     market_section = _slice_after_keywords(body, POSITION_SECTIONS["market_summary"])
@@ -430,10 +434,16 @@ def build_position_summary(position_facts, body: str) -> dict[str, Any]:
     scenario_section = _slice_after_keywords(body, POSITION_SECTIONS["scenarios"])
     risk_section = _slice_after_keywords(body, POSITION_SECTIONS["risk"])
 
+    combined = (
+        position_facts.combined
+        if isinstance(position_facts, DualPositionBundle)
+        else position_facts
+    )
+
     scenario_plan: list[dict[str, Any]] = []
-    if position_facts.scenario_plan:
+    if combined.scenario_plan:
         rank_labels = ("主線", "次線", "尾線")
-        for index, item in enumerate(position_facts.scenario_plan.scenarios):
+        for index, item in enumerate(combined.scenario_plan.scenarios):
             rank = rank_labels[index] if index < len(rank_labels) else f"情境{index + 1}"
             scenario_plan.append(
                 {
@@ -445,18 +455,46 @@ def build_position_summary(position_facts, body: str) -> dict[str, Any]:
                 }
             )
 
-    return {
+    def _leg_summary(leg) -> dict[str, Any] | None:
+        if leg is None:
+            return None
+        return {
+            "shares": leg.shares,
+            "avg_cost": leg.avg_cost,
+            "unrealized_pnl_pct": leg.unrealized_pnl_pct,
+            "pnl_bucket": leg.pnl_bucket,
+            "pnl_bucket_label": PNL_BUCKET_LABEL.get(leg.pnl_bucket, ""),
+            "position_bias": leg.position_bias,
+            "position_bias_label": POSITION_BIAS_LABEL.get(leg.position_bias, ""),
+            "uses_margin": bool(leg.uses_margin),
+            "maintenance_rate_pct": getattr(leg, "maintenance_rate_pct", None),
+            "distance_to_call_pp": getattr(leg, "distance_to_call_pp", None),
+            "margin_call_price": getattr(leg, "margin_call_price", None),
+            "distance_to_call_price_pct": getattr(
+                leg, "distance_to_call_price_pct", None
+            ),
+            "margin_pressure_zone": getattr(leg, "margin_pressure_zone", "unknown"),
+            "margin_pressure_label": getattr(leg, "margin_pressure_label", ""),
+        }
+
+    payload: dict[str, Any] = {
         "version": SUMMARY_VERSION,
-        "unrealized_pnl_pct": position_facts.unrealized_pnl_pct,
-        "pnl_bucket": position_facts.pnl_bucket,
-        "pnl_bucket_label": PNL_BUCKET_LABEL.get(position_facts.pnl_bucket, ""),
-        "position_bias": position_facts.position_bias,
-        "position_bias_label": POSITION_BIAS_LABEL.get(
-            position_facts.position_bias, ""
+        "unrealized_pnl_pct": combined.unrealized_pnl_pct,
+        "pnl_bucket": combined.pnl_bucket,
+        "pnl_bucket_label": PNL_BUCKET_LABEL.get(combined.pnl_bucket, ""),
+        "position_bias": combined.position_bias,
+        "position_bias_label": POSITION_BIAS_LABEL.get(combined.position_bias, ""),
+        "avg_cost": combined.avg_cost,
+        "shares": combined.shares,
+        "uses_margin": bool(getattr(combined, "uses_margin", False)),
+        "maintenance_rate_pct": getattr(combined, "maintenance_rate_pct", None),
+        "distance_to_call_pp": getattr(combined, "distance_to_call_pp", None),
+        "margin_call_price": getattr(combined, "margin_call_price", None),
+        "distance_to_call_price_pct": getattr(
+            combined, "distance_to_call_price_pct", None
         ),
-        "avg_cost": position_facts.avg_cost,
-        "shares": position_facts.shares,
-        "uses_margin": bool(getattr(position_facts, "uses_margin", False)),
+        "margin_pressure_zone": getattr(combined, "margin_pressure_zone", "unknown"),
+        "margin_pressure_label": getattr(combined, "margin_pressure_label", ""),
         "scenario_plan": scenario_plan,
         "narrative": {
             "position_status": _paragraph_text(status_section) or None,
@@ -465,8 +503,17 @@ def build_position_summary(position_facts, body: str) -> dict[str, Any]:
             "scenarios": extract_scenarios(scenario_section),
             "risk_items": extract_list_items(risk_section),
         },
-        "anchors": list(position_facts.anchors or []),
+        "anchors": list(combined.anchors or []),
     }
+
+    if isinstance(position_facts, DualPositionBundle):
+        payload["priority"] = position_facts.priority
+        payload["priority_label"] = position_facts.priority_label
+        payload["synthesis_hint"] = position_facts.synthesis_hint
+        payload["cash"] = _leg_summary(position_facts.cash)
+        payload["margin"] = _leg_summary(position_facts.margin)
+
+    return payload
 
 
 def write_market_summary(
