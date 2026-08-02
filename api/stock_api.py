@@ -49,6 +49,9 @@ PORTFOLIO_SKILL_DIR = ROOT / ".agents" / "skills" / "portfolio-gate"
 PORTFOLIO_GATE_SCRIPT = PORTFOLIO_SKILL_DIR / "portfolio_gate.py"
 PORTFOLIO_PROFILES = ("conservative", "balanced", "aggressive")
 PORTFOLIO_MIN_AMOUNT = 50_000
+MARKET_WEEKLY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-weekly"
+MARKET_WEEKLY_SCRIPT = MARKET_WEEKLY_SKILL_DIR / "market_weekly_gate.py"
+MARKET_ROOT = ROOT / "reports" / "market"
 WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
 
@@ -113,6 +116,38 @@ _jobs_lock = threading.Lock()
 
 _portfolio_jobs: dict[str, "PortfolioJob"] = {}
 _portfolio_jobs_lock = threading.Lock()
+
+_market_weekly_jobs: dict[str, "MarketWeeklyJob"] = {}
+_market_weekly_jobs_lock = threading.Lock()
+
+
+@dataclass
+class MarketWeeklyJob:
+    id: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    as_of: str | None = None
+    week_end: str | None = None
+    week_start: str | None = None
+    error: str | None = None
+    skip_fetch: bool = False
+    skip_news: bool = False
+    force: bool = False
+    facts: dict[str, Any] | None = None
+    summary: dict[str, Any] | None = None
+    markdown: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        return data
+
+
+def _update_market_weekly_job(job: MarketWeeklyJob, **changes: Any) -> None:
+    for key, value in changes.items():
+        setattr(job, key, value)
+    job.updated_at = _now_iso()
 
 
 @dataclass
@@ -190,6 +225,21 @@ class CreatePortfolioJobRequest(BaseModel):
     skip_pdf: bool = True
     force: bool = False
 
+
+class CreateMarketWeeklyJobRequest(BaseModel):
+    as_of: str | None = Field(
+        default=None,
+        description="覆寫當下時間 ISO 或 YYYY-MM-DD（cutover 測試）",
+    )
+    week_end: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="強制週最後交易日（略過 cutover）",
+    )
+    skip_fetch: bool = False
+    skip_news: bool = False
+    force: bool = False
+    max_rounds: int = Field(default=6, ge=1, le=12)
 
 def _run_script(script: Path, args: list[str]) -> int:
     result = subprocess.run(
@@ -789,6 +839,63 @@ def _run_portfolio_pipeline(job_id: str) -> None:
             _update_portfolio_job(job, status=JobStatus.FAILED, error=str(exc))
 
 
+def _load_market_weekly_artifacts(week_end: str) -> dict[str, Any]:
+    out_dir = MARKET_ROOT / week_end
+    facts_file = out_dir / "tw_market_weekly.facts.json"
+    summary_file = out_dir / "tw_market_weekly.summary.json"
+    md_file = out_dir / "tw_market_weekly.md"
+    facts = (
+        json.loads(facts_file.read_text(encoding="utf-8"))
+        if facts_file.exists()
+        else None
+    )
+    summary = (
+        json.loads(summary_file.read_text(encoding="utf-8"))
+        if summary_file.exists()
+        else None
+    )
+    markdown = md_file.read_text(encoding="utf-8") if md_file.exists() else None
+    return {"facts": facts, "summary": summary, "markdown": markdown}
+
+
+def _run_market_weekly_pipeline(job_id: str, max_rounds: int) -> None:
+    with _market_weekly_jobs_lock:
+        job = _market_weekly_jobs.get(job_id)
+    if job is None:
+        return
+    try:
+        with _market_weekly_jobs_lock:
+            _update_market_weekly_job(job, status=JobStatus.GATING, error=None)
+        args: list[str] = ["--max-rounds", str(max_rounds)]
+        if job.week_end:
+            args.extend(["--week-end", job.week_end])
+        elif job.as_of:
+            args.extend(["--as-of", job.as_of])
+        if job.skip_fetch:
+            args.append("--skip-fetch")
+        if job.skip_news:
+            args.append("--skip-news")
+        _run_script(MARKET_WEEKLY_SCRIPT, args)
+        week_end = job.week_end
+        if not week_end:
+            raise RuntimeError("market-weekly job 缺少 week_end")
+        artifacts = _load_market_weekly_artifacts(week_end)
+        if not artifacts.get("markdown"):
+            raise RuntimeError("market-weekly 已結束，但仍找不到報告 Markdown")
+        with _market_weekly_jobs_lock:
+            _update_market_weekly_job(
+                job,
+                status=JobStatus.DONE,
+                facts=artifacts.get("facts"),
+                summary=artifacts.get("summary"),
+                markdown=artifacts.get("markdown"),
+                error=None,
+            )
+    except Exception as exc:
+        with _market_weekly_jobs_lock:
+            _update_market_weekly_job(job, status=JobStatus.FAILED, error=str(exc))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Stock Winning Rate API", version="0.1.0")
 
@@ -1005,6 +1112,117 @@ def create_app() -> FastAPI:
     @app.get("/portfolio/jobs/{job_id}")
     def get_portfolio_job(job_id: str) -> dict[str, Any]:
         job = _get_portfolio_job_or_404(job_id)
+        return {"job": job.to_dict()}
+
+    @app.get("/market-weekly/resolve")
+    def resolve_market_weekly(
+        as_of: str | None = None,
+        week_end: str | None = None,
+    ) -> dict[str, Any]:
+        if week_end is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", week_end):
+            raise HTTPException(status_code=400, detail="week_end 格式須為 YYYY-MM-DD")
+        skill = str(MARKET_WEEKLY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_week_signals import resolve_window_or_fail
+
+            window = resolve_window_or_fail(as_of=as_of, week_end=week_end)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"window": window.as_dict()}
+
+    @app.get("/market-weekly")
+    def list_market_weekly() -> dict[str, Any]:
+        items: list[dict[str, Any]] = []
+        if MARKET_ROOT.exists():
+            for day_dir in sorted(MARKET_ROOT.iterdir(), reverse=True):
+                if not day_dir.is_dir():
+                    continue
+                summary_file = day_dir / "tw_market_weekly.summary.json"
+                facts_file = day_dir / "tw_market_weekly.facts.json"
+                md_file = day_dir / "tw_market_weekly.md"
+                if not summary_file.exists() and not facts_file.exists():
+                    continue
+                summary = None
+                facts = None
+                markdown = None
+                if summary_file.exists():
+                    summary = json.loads(summary_file.read_text(encoding="utf-8"))
+                if facts_file.exists():
+                    facts = json.loads(facts_file.read_text(encoding="utf-8"))
+                if md_file.exists():
+                    markdown = md_file.read_text(encoding="utf-8")
+                items.append(
+                    {
+                        "week_end": day_dir.name,
+                        "week_start": (facts or summary or {}).get("week_start"),
+                        "summary": summary,
+                        "facts": facts,
+                        "markdown": markdown,
+                        "has_report": md_file.exists(),
+                    }
+                )
+        return {"items": items[:30]}
+
+    @app.get("/market-weekly/jobs/{job_id}")
+    def get_market_weekly_job(job_id: str) -> dict[str, Any]:
+        with _market_weekly_jobs_lock:
+            job = _market_weekly_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到 market-weekly job")
+        return {"job": job.to_dict()}
+
+    @app.post("/market-weekly/jobs")
+    def create_market_weekly_job(body: CreateMarketWeeklyJobRequest) -> dict[str, Any]:
+        skill = str(MARKET_WEEKLY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_week_signals import resolve_window_or_fail
+
+            window = resolve_window_or_fail(as_of=body.as_of, week_end=body.week_end)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        out_dir = MARKET_ROOT / window.week_end
+        md_path = out_dir / "tw_market_weekly.md"
+        facts_path = out_dir / "tw_market_weekly.facts.json"
+        summary_path = out_dir / "tw_market_weekly.summary.json"
+
+        job_id = uuid.uuid4().hex
+        reuse = (
+            not body.force
+            and md_path.exists()
+            and facts_path.exists()
+            and summary_path.exists()
+        )
+        job = MarketWeeklyJob(
+            id=job_id,
+            as_of=body.as_of,
+            week_end=window.week_end,
+            week_start=window.week_start,
+            skip_fetch=body.skip_fetch,
+            skip_news=body.skip_news,
+            force=body.force,
+            status=JobStatus.DONE if reuse else JobStatus.GATING,
+        )
+        if reuse:
+            job.facts = json.loads(facts_path.read_text(encoding="utf-8"))
+            job.summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            job.markdown = md_path.read_text(encoding="utf-8")
+
+        with _market_weekly_jobs_lock:
+            _market_weekly_jobs[job_id] = job
+
+        if not reuse:
+            thread = threading.Thread(
+                target=_run_market_weekly_pipeline,
+                args=(job_id, body.max_rounds),
+                daemon=True,
+            )
+            thread.start()
+
         return {"job": job.to_dict()}
 
     @app.post("/jobs")
