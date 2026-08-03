@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-SUMMARY_VERSION = 3
+SUMMARY_VERSION = 4
 
 
 def summary_path(week_end: str, root: Path | None = None) -> Path:
@@ -25,7 +25,14 @@ def _tone(value: float | None) -> str:
     return "neutral"
 
 
-def _extract_section(body: str, keywords: tuple[str, ...]) -> str:
+def _extract_section(
+    body: str,
+    keywords: tuple[str, ...],
+    *,
+    max_chunks: int = 6,
+    max_chars: int = 500,
+    stop_at_subheads: bool = True,
+) -> str:
     lines = body.splitlines()
     start = None
     for i, line in enumerate(lines):
@@ -37,7 +44,6 @@ def _extract_section(body: str, keywords: tuple[str, ...]) -> str:
             start = i
             break
     if start is None:
-        # fallback: first line containing keyword
         for i, line in enumerate(lines):
             if any(kw in line for kw in keywords):
                 start = i
@@ -46,13 +52,37 @@ def _extract_section(body: str, keywords: tuple[str, ...]) -> str:
         return ""
     chunks: list[str] = []
     for line in lines[start + 1 :]:
-        if re.match(r"^#{1,3}\s", line) or re.match(r"^##?\s*[一二三四五六七]", line):
+        stripped = line.strip()
+        is_major = bool(
+            re.match(r"^##?\s*[一二三四五六七]、", stripped)
+            or (
+                re.match(r"^##\s+", stripped)
+                and not stripped.startswith("###")
+                and any(
+                    kw in stripped
+                    for kw in ("大盤", "權值", "類股", "交叉", "下週", "觀察", "免責")
+                )
+            )
+        )
+        is_any_heading = bool(re.match(r"^#{1,3}\s", line))
+        if is_major or (stop_at_subheads and is_any_heading):
             break
         if line.strip():
             chunks.append(line.strip())
-        if len(chunks) >= 6:
+        if len(chunks) >= max_chunks:
             break
-    return " ".join(chunks)[:500]
+    return " ".join(chunks)[:max_chars]
+
+
+def _extract_scenarios_full(body: str) -> str:
+    """Keep fuller next-week block for UI (primary reader value)."""
+    return _extract_section(
+        body,
+        ("下週", "情境"),
+        max_chunks=80,
+        max_chars=3500,
+        stop_at_subheads=False,
+    )
 
 
 def _us_summary(facts: dict[str, Any]) -> dict[str, Any]:
@@ -102,7 +132,7 @@ def build_market_week_summary(
             "weak": (facts.get("sectors") or {}).get("weak") or [],
         },
         "us": _us_summary(facts),
-        "scenarios": _extract_section(body, ("下週", "情境")),
+        "scenarios": _extract_scenarios_full(body),
         "cross": _extract_section(body, ("交叉", "對帳")),
         "watch": _extract_section(body, ("觀察",)),
         "anchors": facts.get("anchors") or [],

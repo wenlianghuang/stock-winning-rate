@@ -22,7 +22,8 @@ class ValidationResult:
         return [issue.message for issue in self.issues]
 
 
-MIN_BODY_CHARS = 400
+MIN_BODY_CHARS = 900
+MIN_SCENARIO_CHARS = 450
 MIN_NEWS_TITLES_CITED = 2
 
 REQUIRED_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
@@ -45,9 +46,57 @@ FORBIDDEN_PHRASES = (
 
 RELATION_KEYWORDS = ("一致", "背離", "落後")
 
+RANK_KEYWORDS = ("最可能", "基準", "次可能", "尾部")
+FALSIFY_KEYWORDS = ("否決",)
+MONDAY_KEYWORDS = ("週一", "周一", "開盤")
+CONTINUITY_KEYWORDS = ("連貫", "銜接", "結構", "本週")
+DASHBOARD_KEYWORDS = ("決策", "檢核", "儀表", "開盤後")
+
 
 def _section_present(body: str, keywords: tuple[str, ...]) -> bool:
     return any(kw in body for kw in keywords)
+
+
+def _is_major_section_heading(line: str) -> bool:
+    """True for top-level report sections (一～七), not ### subsections."""
+    stripped = line.strip()
+    if re.match(r"^##?\s*[一二三四五六七]、", stripped):
+        return True
+    if re.match(r"^#\s+", stripped) and not stripped.startswith("###"):
+        # single-# title only
+        return bool(re.search(r"[一二三四五六七]、", stripped))
+    if re.match(r"^##\s+", stripped) and not stripped.startswith("###"):
+        return bool(
+            re.search(r"[一二三四五六七]、", stripped)
+            or any(kw in stripped for kw in ("大盤", "權值", "類股", "交叉", "下週", "觀察", "免責"))
+        )
+    return False
+
+
+def _extract_scenarios_section(body: str) -> str:
+    lines = body.splitlines()
+    start: int | None = None
+    for i, line in enumerate(lines):
+        if any(kw in line for kw in ("下週", "情境")) and (
+            line.strip().startswith("#")
+            or re.match(r"^##?\s*[一二三四五六七]", line)
+            or "五" in line[:8]
+        ):
+            start = i
+            break
+    if start is None:
+        for i, line in enumerate(lines):
+            if "下週" in line or "情境" in line:
+                start = i
+                break
+    if start is None:
+        return body
+    chunks: list[str] = []
+    for line in lines[start + 1 :]:
+        if _is_major_section_heading(line):
+            break
+        chunks.append(line)
+    return "\n".join(chunks).strip() or body
 
 
 def _extract_cross_section(body: str) -> str:
@@ -71,7 +120,7 @@ def _extract_cross_section(body: str) -> str:
         return body
     chunks: list[str] = []
     for line in lines[start + 1 :]:
-        if re.match(r"^#{1,3}\s", line) or re.match(r"^##?\s*[一二三四五六七]", line):
+        if _is_major_section_heading(line):
             break
         chunks.append(line)
     return "\n".join(chunks).strip() or body
@@ -132,38 +181,115 @@ def _us_number_tokens(facts: dict[str, Any]) -> list[str]:
     return tokens
 
 
-def _extract_scenarios_section(body: str) -> str:
-    lines = body.splitlines()
-    start: int | None = None
-    for i, line in enumerate(lines):
-        if any(kw in line for kw in ("下週", "情境")) and (
-            line.strip().startswith("#")
-            or re.match(r"^##?\s*[一二三四五六七]", line)
-            or "五" in line[:8]
-        ):
-            start = i
-            break
-    if start is None:
-        for i, line in enumerate(lines):
-            if "下週" in line or "情境" in line:
-                start = i
-                break
-    if start is None:
-        return body
-    chunks: list[str] = []
-    for line in lines[start + 1 :]:
-        if re.match(r"^#{1,3}\s", line) or re.match(r"^##?\s*[一二三四五六七]", line):
-            break
-        chunks.append(line)
-    return "\n".join(chunks).strip() or body
-
-
 def _has_nasdaq_mention(text: str) -> bool:
     return any(kw in text for kw in ("那斯達克", "那指", "IXIC", "^IXIC"))
 
 
 def _has_sox_mention(text: str) -> bool:
     return any(kw in text for kw in ("費半", "費城半導體", "SOX", "^SOX"))
+
+
+def _count_scenario_blocks(scenarios: str) -> int:
+    """Count distinct scenario headings / numbered scenarios."""
+    patterns = (
+        r"情境\s*[一二三123]",
+        r"\*\*情境",
+        r"最可能",
+        r"次可能",
+        r"尾部",
+        r"基準",
+    )
+    hits = 0
+    for pat in patterns:
+        hits += len(re.findall(pat, scenarios))
+    # Cap by unique-ish signal: prefer explicit 情境N count
+    numbered = len(re.findall(r"情境\s*[一二三123]", scenarios))
+    if numbered >= 2:
+        return numbered
+    ranked = sum(1 for kw in ("最可能", "次可能", "尾部", "基準") if kw in scenarios)
+    return max(numbered, ranked, 1 if "情境" in scenarios else 0)
+
+
+def _validate_scenarios(
+    text: str,
+    facts: dict[str, Any],
+    issues: list[ValidationIssue],
+) -> None:
+    scenarios = _extract_scenarios_section(text)
+    if len(scenarios) < MIN_SCENARIO_CHARS:
+        issues.append(
+            ValidationIssue(
+                "scenarios_too_thin",
+                f"下週情境過短（<{MIN_SCENARIO_CHARS} 字）。請加厚：排序、結構連貫、週一含義、否決與決策儀表板",
+            )
+        )
+
+    if _count_scenario_blocks(scenarios) < 2:
+        issues.append(
+            ValidationIssue(
+                "scenarios_too_few",
+                "下週情境須至少 2～3 種可區分路徑（標明最可能／次可能／尾部或情境一～三）",
+            )
+        )
+
+    rank_hits = sum(1 for kw in RANK_KEYWORDS if kw in scenarios)
+    if rank_hits < 2:
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_rank",
+                "情境須標明排序（至少出現兩種：最可能／基準／次可能／尾部）",
+            )
+        )
+
+    if not any(kw in scenarios for kw in FALSIFY_KEYWORDS):
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_falsifier",
+                "每一情境路徑須含「否決」條件（至少在第五章出現「否決」）",
+            )
+        )
+
+    if not any(kw in scenarios for kw in MONDAY_KEYWORDS):
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_monday",
+                "第五章須明確討論週一／開盤含義（假日後第一個交易決策）",
+            )
+        )
+
+    if not any(kw in scenarios for kw in CONTINUITY_KEYWORDS):
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_continuity",
+                "情境須說明與本週結構的連貫／銜接（勿憑空列口號）",
+            )
+        )
+
+    if "可追蹤" not in scenarios and "訊號" not in scenarios:
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_signals",
+                "情境須含可追蹤訊號（寫「可追蹤」或「訊號」）",
+            )
+        )
+
+    if not any(kw in scenarios for kw in DASHBOARD_KEYWORDS):
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_monday_dashboard",
+                "須含「週一決策儀表板／檢核清單」（關鍵字：決策、檢核、儀表或開盤後）",
+            )
+        )
+
+    # Scenarios should cite at least one fact number
+    number_tokens = _fact_number_tokens(facts)
+    if number_tokens and not any(tok in scenarios for tok in number_tokens[:24]):
+        issues.append(
+            ValidationIssue(
+                "scenarios_missing_fact_number",
+                "第五章須引用至少一個 facts 數字（大盤／權值／類股／美股週報酬）",
+            )
+        )
 
 
 def _validate_us_cross(
@@ -382,5 +508,6 @@ def validate_market_week_report(
         pass
 
     _validate_us_cross(text, facts, issues)
+    _validate_scenarios(text, facts, issues)
 
     return ValidationResult(passed=not issues, issues=issues)

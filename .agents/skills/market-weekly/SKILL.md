@@ -10,6 +10,8 @@ description: 台股市場週報：大盤 + 權值 + 證交所類股強弱 + 那�
 台北時間**週五 17:30 前**產出／對應的是**上一曆週**；**17:30 起**才是**本曆週**。  
 Python 組 deterministic facts（FinMind 加權、權值池 CSV、TWSE MI_INDEX 類股、Yahoo 那指／費半週報酬），agy 寫敘事（含台美對帳），規則驗證閉環。
 
+**篇幅重心在「五、下週情境推演」**：假日無交易、讀者要為週一做準備。須含最可能／次可能／尾部排序、結構連貫、觸發、週一開盤含義、可追蹤訊號、否決條件、週一決策儀表板。一～三保持精簡。
+
 美股對齊規則：
 
 - 使用該 TW 曆週的 **Monday～Friday**（`WeekWindow.week_monday`～`week_friday`），不是 TWSE `trading_days` 列表。
