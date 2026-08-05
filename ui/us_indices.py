@@ -280,3 +280,86 @@ def build_us_week_block(
         "available": len(usable) > 0,
         "indices": indices,
     }
+
+
+def index_day_from_closes(
+    closes: dict[str, float],
+    *,
+    symbol: str,
+    name: str,
+    short_name: str,
+    as_of: date | str,
+) -> dict[str, Any] | None:
+    """Latest completed session day return on or before as_of."""
+    end_d = _to_date(as_of)
+    sessions = sorted(
+        (
+            (day, close)
+            for day, close in closes.items()
+            if date.fromisoformat(day) <= end_d
+        ),
+        key=lambda item: item[0],
+    )
+    if len(sessions) < 2:
+        return None
+    prev_day, prev_close = sessions[-2]
+    last_day, last_close = sessions[-1]
+    ret = week_return_pct(prev_close, last_close)
+    if ret is None:
+        return None
+    return {
+        "symbol": symbol,
+        "name": name,
+        "short_name": short_name,
+        "session_date": last_day,
+        "prior_session_date": prev_day,
+        "close": last_close,
+        "prior_close": prev_close,
+        "day_return_pct": ret,
+    }
+
+
+def build_us_day_block(
+    as_of: date | str,
+    *,
+    session: requests.Session | None = None,
+    definitions: tuple[dict[str, str], ...] | None = None,
+    lookback_calendar_days: int = 10,
+) -> dict[str, Any]:
+    """IXIC/SOX latest daily returns on or before as_of (Phase 1, no overnight wait)."""
+    end_d = _to_date(as_of)
+    start_d = end_d - timedelta(days=lookback_calendar_days)
+    items = definitions or US_WEEKLY_INDICES
+    http = session or requests.Session()
+    indices: dict[str, Any] = {}
+    for item in items:
+        key = item.get("key") or item["symbol"].lstrip("^")
+        try:
+            closes = fetch_index_week_bars(
+                item["symbol"],
+                start_d,
+                end_d,
+                session=http,
+            )
+            block = index_day_from_closes(
+                closes,
+                symbol=item["symbol"],
+                name=item.get("name", item["symbol"]),
+                short_name=item.get("short_name", item["symbol"]),
+                as_of=end_d,
+            )
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            block = None
+        indices[key] = block
+
+    usable = [
+        v
+        for v in indices.values()
+        if isinstance(v, dict) and v.get("day_return_pct") is not None
+    ]
+    return {
+        "source": "yahoo_finance",
+        "as_of": end_d.isoformat(),
+        "available": len(usable) > 0,
+        "indices": indices,
+    }

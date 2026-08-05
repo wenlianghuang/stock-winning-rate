@@ -51,6 +51,8 @@ PORTFOLIO_PROFILES = ("conservative", "balanced", "aggressive")
 PORTFOLIO_MIN_AMOUNT = 50_000
 MARKET_WEEKLY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-weekly"
 MARKET_WEEKLY_SCRIPT = MARKET_WEEKLY_SKILL_DIR / "market_weekly_gate.py"
+MARKET_DAILY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-daily"
+MARKET_DAILY_SCRIPT = MARKET_DAILY_SKILL_DIR / "market_daily_gate.py"
 MARKET_ROOT = ROOT / "reports" / "market"
 WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
@@ -120,6 +122,9 @@ _portfolio_jobs_lock = threading.Lock()
 _market_weekly_jobs: dict[str, "MarketWeeklyJob"] = {}
 _market_weekly_jobs_lock = threading.Lock()
 
+_market_daily_jobs: dict[str, "MarketDailyJob"] = {}
+_market_daily_jobs_lock = threading.Lock()
+
 
 @dataclass
 class MarketWeeklyJob:
@@ -145,6 +150,35 @@ class MarketWeeklyJob:
 
 
 def _update_market_weekly_job(job: MarketWeeklyJob, **changes: Any) -> None:
+    for key, value in changes.items():
+        setattr(job, key, value)
+    job.updated_at = _now_iso()
+
+
+@dataclass
+class MarketDailyJob:
+    id: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    as_of: str | None = None
+    trade_date: str | None = None
+    for_session: str | None = None
+    error: str | None = None
+    skip_fetch: bool = False
+    skip_us: bool = False
+    force: bool = False
+    facts: dict[str, Any] | None = None
+    summary: dict[str, Any] | None = None
+    markdown: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        return data
+
+
+def _update_market_daily_job(job: MarketDailyJob, **changes: Any) -> None:
     for key, value in changes.items():
         setattr(job, key, value)
     job.updated_at = _now_iso()
@@ -238,6 +272,22 @@ class CreateMarketWeeklyJobRequest(BaseModel):
     )
     skip_fetch: bool = False
     skip_news: bool = False
+    force: bool = False
+    max_rounds: int = Field(default=6, ge=1, le=12)
+
+
+class CreateMarketDailyJobRequest(BaseModel):
+    as_of: str | None = Field(
+        default=None,
+        description="覆寫當下時間 ISO 或 YYYY-MM-DD（cutover 測試）",
+    )
+    trade_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="強制籌碼 trade_date（略過 cutover）",
+    )
+    skip_fetch: bool = False
+    skip_us: bool = False
     force: bool = False
     max_rounds: int = Field(default=6, ge=1, le=12)
 
@@ -896,6 +946,63 @@ def _run_market_weekly_pipeline(job_id: str, max_rounds: int) -> None:
             _update_market_weekly_job(job, status=JobStatus.FAILED, error=str(exc))
 
 
+def _load_market_daily_artifacts(trade_date: str) -> dict[str, Any]:
+    out_dir = MARKET_ROOT / trade_date
+    facts_file = out_dir / "tw_market_daily.facts.json"
+    summary_file = out_dir / "tw_market_daily.summary.json"
+    md_file = out_dir / "tw_market_daily.md"
+    facts = (
+        json.loads(facts_file.read_text(encoding="utf-8"))
+        if facts_file.exists()
+        else None
+    )
+    summary = (
+        json.loads(summary_file.read_text(encoding="utf-8"))
+        if summary_file.exists()
+        else None
+    )
+    markdown = md_file.read_text(encoding="utf-8") if md_file.exists() else None
+    return {"facts": facts, "summary": summary, "markdown": markdown}
+
+
+def _run_market_daily_pipeline(job_id: str, max_rounds: int) -> None:
+    with _market_daily_jobs_lock:
+        job = _market_daily_jobs.get(job_id)
+    if job is None:
+        return
+    try:
+        with _market_daily_jobs_lock:
+            _update_market_daily_job(job, status=JobStatus.GATING, error=None)
+        args: list[str] = ["--max-rounds", str(max_rounds)]
+        if job.trade_date:
+            args.extend(["--date", job.trade_date])
+        elif job.as_of:
+            args.extend(["--as-of", job.as_of])
+        if job.skip_fetch:
+            args.append("--skip-fetch")
+        if job.skip_us:
+            args.append("--skip-us")
+        _run_script(MARKET_DAILY_SCRIPT, args)
+        trade_date = job.trade_date
+        if not trade_date:
+            raise RuntimeError("market-daily job 缺少 trade_date")
+        artifacts = _load_market_daily_artifacts(trade_date)
+        if not artifacts.get("markdown"):
+            raise RuntimeError("market-daily 已結束，但仍找不到報告 Markdown")
+        with _market_daily_jobs_lock:
+            _update_market_daily_job(
+                job,
+                status=JobStatus.DONE,
+                facts=artifacts.get("facts"),
+                summary=artifacts.get("summary"),
+                markdown=artifacts.get("markdown"),
+                error=None,
+            )
+    except Exception as exc:
+        with _market_daily_jobs_lock:
+            _update_market_daily_job(job, status=JobStatus.FAILED, error=str(exc))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Stock Winning Rate API", version="0.1.0")
 
@@ -1218,6 +1325,117 @@ def create_app() -> FastAPI:
         if not reuse:
             thread = threading.Thread(
                 target=_run_market_weekly_pipeline,
+                args=(job_id, body.max_rounds),
+                daemon=True,
+            )
+            thread.start()
+
+        return {"job": job.to_dict()}
+
+    @app.get("/market-daily/resolve")
+    def resolve_market_daily(
+        as_of: str | None = None,
+        trade_date: str | None = None,
+    ) -> dict[str, Any]:
+        if trade_date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", trade_date):
+            raise HTTPException(status_code=400, detail="trade_date 格式須為 YYYY-MM-DD")
+        skill = str(MARKET_DAILY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_day_signals import resolve_window_or_fail
+
+            window = resolve_window_or_fail(as_of=as_of, trade_date=trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"window": window.as_dict()}
+
+    @app.get("/market-daily")
+    def list_market_daily() -> dict[str, Any]:
+        items: list[dict[str, Any]] = []
+        if MARKET_ROOT.exists():
+            for day_dir in sorted(MARKET_ROOT.iterdir(), reverse=True):
+                if not day_dir.is_dir():
+                    continue
+                summary_file = day_dir / "tw_market_daily.summary.json"
+                facts_file = day_dir / "tw_market_daily.facts.json"
+                md_file = day_dir / "tw_market_daily.md"
+                if not summary_file.exists() and not facts_file.exists():
+                    continue
+                summary = None
+                facts = None
+                markdown = None
+                if summary_file.exists():
+                    summary = json.loads(summary_file.read_text(encoding="utf-8"))
+                if facts_file.exists():
+                    facts = json.loads(facts_file.read_text(encoding="utf-8"))
+                if md_file.exists():
+                    markdown = md_file.read_text(encoding="utf-8")
+                items.append(
+                    {
+                        "trade_date": day_dir.name,
+                        "for_session": (facts or summary or {}).get("for_session"),
+                        "summary": summary,
+                        "facts": facts,
+                        "markdown": markdown,
+                        "has_report": md_file.exists(),
+                    }
+                )
+        return {"items": items[:30]}
+
+    @app.get("/market-daily/jobs/{job_id}")
+    def get_market_daily_job(job_id: str) -> dict[str, Any]:
+        with _market_daily_jobs_lock:
+            job = _market_daily_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到 market-daily job")
+        return {"job": job.to_dict()}
+
+    @app.post("/market-daily/jobs")
+    def create_market_daily_job(body: CreateMarketDailyJobRequest) -> dict[str, Any]:
+        skill = str(MARKET_DAILY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_day_signals import resolve_window_or_fail
+
+            window = resolve_window_or_fail(as_of=body.as_of, trade_date=body.trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        out_dir = MARKET_ROOT / window.trade_date
+        md_path = out_dir / "tw_market_daily.md"
+        facts_path = out_dir / "tw_market_daily.facts.json"
+        summary_path = out_dir / "tw_market_daily.summary.json"
+
+        job_id = uuid.uuid4().hex
+        reuse = (
+            not body.force
+            and md_path.exists()
+            and facts_path.exists()
+            and summary_path.exists()
+        )
+        job = MarketDailyJob(
+            id=job_id,
+            as_of=body.as_of,
+            trade_date=window.trade_date,
+            for_session=window.for_session,
+            skip_fetch=body.skip_fetch,
+            skip_us=body.skip_us,
+            force=body.force,
+            status=JobStatus.DONE if reuse else JobStatus.GATING,
+        )
+        if reuse:
+            job.facts = json.loads(facts_path.read_text(encoding="utf-8"))
+            job.summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            job.markdown = md_path.read_text(encoding="utf-8")
+
+        with _market_daily_jobs_lock:
+            _market_daily_jobs[job_id] = job
+
+        if not reuse:
+            thread = threading.Thread(
+                target=_run_market_daily_pipeline,
                 args=(job_id, body.max_rounds),
                 daemon=True,
             )
