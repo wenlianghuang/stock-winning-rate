@@ -45,3 +45,27 @@ uv run --extra ui --extra stock python main.py market-daily \
 ## Output
 
 `reports/market/{trade_date}/tw_market_daily.{facts.json,md,summary.json,gate.log}`
+
+## Grounded chat（Phase 2）
+
+```bash
+# 常見事實題（外資／偏誤等）走 facts_template，不需 Ollama
+uv run python main.py market-daily-chat --date 2026-08-03 -m "今天外資怎麼做？" --dry-run --json
+
+# 進場政策模板
+uv run python main.py market-daily-chat --date 2026-08-03 -m "明天是否進場" --dry-run --json
+
+# 外訊：優先 reports/us-tech/*_raw.json；--skip-tavily 略過付費搜尋
+uv run python main.py market-daily-chat --date 2026-08-03 -m "有什麼科技新聞？" --dry-run --skip-tavily --json
+
+# API（僅 SSE）
+# POST /market-daily/chat/stream
+# { message, facts?, summary?, markdown?, trade_date?, has_holdings, holdings?, skip_tavily? }
+# events: meta / token / done / error
+```
+
+環境變數：
+- `OLLAMA_BASE_URL`（預設 `http://127.0.0.1:11434`）、`OLLAMA_MODEL`（預設 `llama3.1`）— 長尾 factual／外訊潤飾
+- `TAVILY_API_KEY`、`TAVILY_DAILY_LIMIT`（預設 5）— RSS 無命中時才用；計數在 `reports/market/_chat_quota/`
+
+報告站：`POST /api/market-daily/[id]/chat`（SSE，別名 `/chat/stream`）；UI 逐字顯示 LLM 回覆。

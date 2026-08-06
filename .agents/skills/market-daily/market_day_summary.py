@@ -59,7 +59,8 @@ def _extract_section(
             chunks.append(stripped)
         if len(chunks) >= max_chunks:
             break
-    return " ".join(chunks)[:max_chars]
+    # Preserve line breaks so UI can render Markdown lists / headings.
+    return "\n".join(chunks)[:max_chars]
 
 
 def _us_summary(facts: dict[str, Any]) -> dict[str, Any]:
@@ -112,6 +113,7 @@ def build_market_day_summary(
             "trust_net": inst.get("trust_net"),
             "dealer_net": inst.get("dealer_net"),
             "total_net": inst.get("total_net"),
+            "unit": inst.get("unit") or "twd",
         },
         "technical": facts.get("technical") or {},
         "tsmc": facts.get("tsmc") or {},

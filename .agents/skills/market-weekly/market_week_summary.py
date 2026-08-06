@@ -71,7 +71,8 @@ def _extract_section(
             chunks.append(line.strip())
         if len(chunks) >= max_chunks:
             break
-    return " ".join(chunks)[:max_chars]
+    # Preserve line breaks so UI can render Markdown lists / headings.
+    return "\n".join(chunks)[:max_chars]
 
 
 def _extract_scenarios_full(body: str) -> str:

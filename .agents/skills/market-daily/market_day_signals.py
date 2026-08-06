@@ -87,6 +87,15 @@ def _to_int(raw: Any) -> int | None:
     return int(round(value))
 
 
+def _fmt_twd_yi(value: int | float | None) -> str:
+    """Format TWD amount as 億元 (1e8), e.g. +903.08 億元."""
+    if value is None:
+        return "—"
+    yi = float(value) / 1e8
+    prefix = "+" if yi > 0 else ""
+    return f"{prefix}{yi:,.2f} 億元"
+
+
 def _sign(value: int | float | None, *, deadband: int = 0) -> int:
     if value is None:
         return 0
@@ -283,7 +292,8 @@ def build_institutional_block(
             "total_net": None,
             "consensus": "unknown",
             "consensus_label": INSTITUTIONAL_LABEL["unknown"],
-            "unit": "shares",
+            # FinMind TaiwanStockTotalInstitutionalInvestors = TWSE 買賣金額（元）
+            "unit": "twd",
         }
 
     foreign = 0
@@ -322,7 +332,8 @@ def build_institutional_block(
         "total_net": total,
         "consensus": consensus,
         "consensus_label": INSTITUTIONAL_LABEL.get(consensus, consensus),
-        "unit": "shares",
+        # FinMind TaiwanStockTotalInstitutionalInvestors = TWSE 買賣金額（元）
+        "unit": "twd",
     }
 
 
@@ -525,7 +536,7 @@ def build_anchors(facts: MarketDayFacts) -> list[str]:
     if inst.get("available"):
         anchors.append(inst.get("consensus_label") or INSTITUTIONAL_LABEL["unknown"])
         if inst.get("foreign_net") is not None:
-            anchors.append(f"外資淨額 {inst['foreign_net']}")
+            anchors.append(f"外資淨額 {_fmt_twd_yi(inst['foreign_net'])}")
     tech = facts.technical
     if tech.get("ma5") is not None:
         anchors.append(f"MA5 {tech['ma5']}（{tech.get('vs_ma5')}）")
@@ -668,7 +679,7 @@ def facts_summary_for_prompt(facts: MarketDayFacts) -> str:
         "=== 量能 ===",
         json.dumps(facts.volume, ensure_ascii=False, indent=2),
         "",
-        "=== 三大法人（全市場；單位 shares）===",
+        "=== 三大法人（全市場；單位 元／TWD；顯示常用億元）===",
         json.dumps(facts.institutional, ensure_ascii=False, indent=2),
         "",
         "=== 技術錨點 ===",

@@ -21,7 +21,7 @@ from typing import Any
 try:
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, StreamingResponse
     from pydantic import BaseModel, Field
     import uvicorn
 except ImportError as exc:
@@ -290,6 +290,29 @@ class CreateMarketDailyJobRequest(BaseModel):
     skip_us: bool = False
     force: bool = False
     max_rounds: int = Field(default=6, ge=1, le=12)
+
+
+class MarketDailyChatHistoryItem(BaseModel):
+    role: str = Field(description="user 或 assistant")
+    content: str
+
+
+class MarketDailyChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    trade_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="若未帶 artifacts，則從此日期載入報告",
+    )
+    facts: dict[str, Any] | None = None
+    summary: dict[str, Any] | None = None
+    markdown: str | None = None
+    has_holdings: bool = False
+    holdings: list[dict[str, Any]] = Field(default_factory=list)
+    history: list[MarketDailyChatHistoryItem] = Field(default_factory=list)
+    use_llm: bool = True
+    skip_tavily: bool = False
+
 
 def _run_script(script: Path, args: list[str]) -> int:
     result = subprocess.run(
@@ -1442,6 +1465,88 @@ def create_app() -> FastAPI:
             thread.start()
 
         return {"job": job.to_dict()}
+
+    @app.post("/market-daily/chat/stream")
+    async def market_daily_chat_stream(
+        body: MarketDailyChatRequest,
+    ) -> StreamingResponse:
+        skill = str(MARKET_DAILY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_day_chat import format_sse, iter_market_day_chat_events
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"無法載入 market_day_chat：{exc}"
+            ) from exc
+
+        has_artifacts = body.facts is not None or body.summary is not None or bool(
+            body.markdown
+        )
+        if not has_artifacts and not body.trade_date:
+            raise HTTPException(
+                status_code=400,
+                detail="需要 facts/summary/markdown 或 trade_date",
+            )
+
+        history = [
+            {"role": item.role, "content": item.content}
+            for item in body.history
+            if item.role in ("user", "assistant") and item.content.strip()
+        ]
+
+        import asyncio
+
+        async def event_gen():
+            # Run blocking Ollama iteration in a worker thread; push SSE chunks
+            # through a queue so the event loop can flush each token promptly.
+            queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+
+            def worker() -> None:
+                try:
+                    for event, payload in iter_market_day_chat_events(
+                        message=body.message,
+                        facts=body.facts,
+                        summary=body.summary,
+                        markdown=body.markdown,
+                        trade_date=body.trade_date,
+                        has_holdings=body.has_holdings,
+                        holdings=body.holdings,
+                        history=history,
+                        use_llm=body.use_llm,
+                        skip_tavily=body.skip_tavily,
+                    ):
+                        chunk = format_sse(event, payload).encode("utf-8")
+                        fut = asyncio.run_coroutine_threadsafe(queue.put(chunk), loop)
+                        fut.result()
+                except Exception as exc:
+                    chunk = format_sse("error", {"error": str(exc)}).encode("utf-8")
+                    fut = asyncio.run_coroutine_threadsafe(queue.put(chunk), loop)
+                    fut.result()
+                finally:
+                    fut = asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                    fut.result()
+
+            loop.run_in_executor(None, worker)
+
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    break
+                yield chunk
+                # Let uvicorn flush before the next token arrives.
+                await asyncio.sleep(0)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:

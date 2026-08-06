@@ -31,6 +31,7 @@ from market_day_signals import (  # noqa: E402
     day_return_pct,
     institutional_consensus,
 )
+from market_day_summary import build_market_day_summary  # noqa: E402
 from validate_market_day import validate_market_day_report  # noqa: E402
 
 
@@ -90,6 +91,7 @@ class TestInstitutional(unittest.TestCase):
         self.assertEqual(block["trust_net"], 400)
         self.assertEqual(block["dealer_net"], 50)
         self.assertEqual(block["consensus"], "bullish")
+        self.assertEqual(block["unit"], "twd")
 
 
 class TestVolume(unittest.TestCase):
@@ -231,6 +233,37 @@ class TestValidate(unittest.TestCase):
         body = "保證獲利 一定漲 " + ("觀察重點\n- a\n- b\n- c\n- d\n" * 20)
         result = validate_market_day_report(body, self._facts())
         self.assertFalse(result.passed)
+
+
+class TestMarketDaySummaryExtract(unittest.TestCase):
+    def test_preserves_newlines_for_markdown_ui(self) -> None:
+        body = """
+## 三、明日開盤偏誤
+**整體偏誤方向：中性**
+### 1. 基準情境
+- **觸發條件**：開盤區間震盪
+### 2. 尾部風險
+- **觸發條件**：費半續弱
+
+## 四、開盤儀表板
+1. **觀察加權** → 較支持基準
+2. **觀察台積電** → 支持尾部
+3. **觀察那指** → 支持基準
+4. **觀察量能** → 偏震盪
+
+## 五、免責聲明
+僅供參考。
+"""
+        summary = build_market_day_summary(
+            {"trade_date": "2026-08-05", "for_session": "2026-08-06", "bias_hint": "neutral"},
+            body,
+        )
+        self.assertIn("\n", summary["bias"])
+        self.assertIn("### 1. 基準情境", summary["bias"])
+        self.assertIn("- **觸發條件**", summary["bias"])
+        self.assertIn("\n", summary["dashboard"])
+        self.assertIn("1. **觀察加權**", summary["dashboard"])
+        self.assertIn("2. **觀察台積電**", summary["dashboard"])
 
 
 if __name__ == "__main__":

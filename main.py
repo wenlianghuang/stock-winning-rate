@@ -42,6 +42,10 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
         ROOT / ".agents" / "skills" / "market-daily" / "market_daily_gate.py",
         "ui,stock",
     ),
+    "market-daily-chat": (
+        ROOT / ".agents" / "skills" / "market-daily" / "market_day_chat.py",
+        None,
+    ),
     "api": (ROOT / "api" / "stock_api.py", "server,ui,stock"),
     "gate-stats": (ROOT / "tools" / "gate_stats.py", None),
     "outcome-label": (ROOT / "tools" / "outcome_label.py", None),
