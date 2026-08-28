@@ -197,8 +197,9 @@ def validate_single_stock_report(
                     f"報告不應包含「{phrase}」",
                 )
             )
-
+    # 1. fact-consistency layer
     issues.extend(validate_facts(text, facts))
+    # 2. reasoning-quality layer
     issues.extend(
         validate_reasoning(
             text, facts, has_news=has_news, news_titles=news_titles
