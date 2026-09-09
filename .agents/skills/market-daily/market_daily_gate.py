@@ -112,27 +112,16 @@ def ensure_tsmc_csv(
     """Best-effort: refresh 2330 chip CSV for trade_date (optional context)."""
     if skip_fetch:
         return
-    script = (
-        project_root()
-        / ".agents"
-        / "skills"
-        / "tw-stock-report"
-        / "fetch_chip_report.py"
-    )
-    if not script.exists():
+    ensure_paths()
+    try:
+        from fetch_chip_report import run_fetch
+    except ImportError:
         return
-    cmd = [
-        sys.executable,
-        str(script),
-        "--stocks",
-        "2330",
-        "--date",
-        window.trade_date,
-        "--lookback-days",
-        "5",
-    ]
     print(f"PROGRESS: stock-report 2330 @ {window.trade_date}", file=sys.stderr)
-    subprocess.run(cmd, cwd=project_root(), check=False)
+    try:
+        run_fetch(stocks=["2330"], date=window.trade_date, lookback_days=5)
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: stock-report 2330 失敗：{exc}", file=sys.stderr)
 
 
 def write_markdown(path: Path, body: str, facts: dict[str, Any]) -> None:

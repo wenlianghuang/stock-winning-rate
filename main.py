@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +53,46 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
     "calibrate": (ROOT / "tools" / "calibrate_thresholds.py", None),
 }
 
+# Phase 0: these commands share agent.tools / skill functions in-process.
+INPROC_COMMANDS: dict[str, tuple[str, str]] = {
+    "stock-report": ("tw-stock-report", "fetch_chip_report"),
+    "report-gate": ("report-gate", "report_gate"),
+    "position-gate": ("position-gate", "position_gate"),
+    "market-daily": ("market-daily", "market_daily_gate"),
+    "market-daily-chat": ("market-daily", "market_day_chat"),
+}
+
+
+def _run_inprocess(skill_name: str, module_name: str, extra_args: list[str]) -> int:
+    skill_dir = ROOT / ".agents" / "skills" / skill_name
+    ui_dir = ROOT / "ui"
+    stock_dir = ROOT / ".agents" / "skills" / "tw-stock-report"
+    for path in (ui_dir, stock_dir, skill_dir):
+        text = str(path)
+        if text not in sys.path:
+            sys.path.insert(0, text)
+    mod = importlib.import_module(module_name)
+    script = skill_dir / f"{module_name}.py"
+    previous_argv = sys.argv
+    sys.argv = [str(script), *extra_args]
+    try:
+        return int(mod.main(extra_args))
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 1
+    finally:
+        sys.argv = previous_argv
+
 
 def _run_command(command: str, extra_args: list[str]) -> int:
+    if command in INPROC_COMMANDS:
+        skill_name, module_name = INPROC_COMMANDS[command]
+        return _run_inprocess(skill_name, module_name, extra_args)
+
     script, _extra = COMMANDS[command]
     if not script.exists():
         print(f"ERROR: missing script: {script}", file=sys.stderr)
