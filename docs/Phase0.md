@@ -198,4 +198,6 @@ uv run --extra ui --extra stock python main.py report-gate -- 2409 --skip-pdf
 
 ## 8. 下一階段
 
-Phase 1（[`agent-roadmap.md`](./agent-roadmap.md)）：`python main.py mcp` expose 本層 tools。建議先掛 `fetch_chips`、`run_report_gate`、`get_last_trading_date`，用 inspector 跑通 `fetch_chips(2330)` → `run_report_gate(2330)`。FastAPI 保留給網站。
+Phase 1 落地見 [`Phase1.md`](./Phase1.md)：`python main.py mcp` expose 本層 tools。建議用 inspector 或測試裡的最小 client 跑通 `fetch_chips(2330)` → `run_report_gate(2330)`。FastAPI 保留給網站。
+
+「我先做了券商研究作業裡最難的一塊：數字由程式算、模型只寫敘事、不合格就打回。後來發現這還只是人觸發的 pipeline，所以把同一組能力收成 tool，再加上編排與核准——因為職缺要的是會自己跑流程、但不能自己寄信／下單的 Agent。」

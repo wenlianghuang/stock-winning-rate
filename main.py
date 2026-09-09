@@ -111,11 +111,18 @@ def main(argv: list[str] | None = None) -> int:
         for name, (script, extra) in COMMANDS.items():
             extra_hint = f" (extra: {extra})" if extra else ""
             print(f"  {name:<16} {script.relative_to(ROOT)}{extra_hint}")
+        print(f"  {'mcp':<16} agent/mcp_server.py (extra: mcp,stock,ui)")
         print("\nExample: uv run --extra stock python main.py stock-report --stocks 2330")
         print("         uv run --extra server --extra ui --extra stock python main.py api")
+        print("         uv run --extra mcp --extra stock --extra ui python main.py mcp")
         return 0
 
     command = argv[0]
+    if command == "mcp":
+        from agent.mcp_server import main as run_mcp
+
+        return run_mcp(argv[1:])
+
     if command not in COMMANDS:
         print(f"ERROR: unknown command: {command}", file=sys.stderr)
         print("Run `python main.py` to list commands.", file=sys.stderr)

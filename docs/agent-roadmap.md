@@ -135,6 +135,8 @@
 
 ### Phase 1 — MCP server
 
+落地說明（概念、expose 哪些 tools、如何用 inspector／最小 client 跑 2330）見 [`Phase1.md`](./Phase1.md)。
+
 `pyproject.toml` 的 `mcp` extra 在這裡落地。
 
 - `python main.py mcp`（或同等入口）啟動 MCP server，expose Phase 0 的 tools。

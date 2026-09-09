@@ -1,4 +1,4 @@
-"""Phase 0 typed tools. CLI and FastAPI call these; MCP will wrap them later."""
+"""Phase 0 typed tools. CLI, FastAPI, and the Phase 1 MCP server call these."""
 
 from __future__ import annotations
 

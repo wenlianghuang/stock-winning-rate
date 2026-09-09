@@ -3,7 +3,7 @@
 專案根目錄執行。統一入口是 `main.py`；細節見各 skill 的 `SKILL.md`。
 
 ```bash
-uv sync --extra stock --extra ui --extra server --extra tech
+uv sync --extra stock --extra ui --extra server --extra tech --extra mcp
 python main.py --list
 ```
 
@@ -92,6 +92,16 @@ uv run --extra tech python main.py tech-news -- --force
 uv run --extra tech python main.py tech-news -- --skip-summary
 uv run --extra tech python main.py tech-news -- --validate-only
 uv run --extra tech python main.py tech-news -- --hours 72
+```
+
+---
+
+## MCP（給 Agent，不是日常產報）
+
+細節見 [`Phase1.md`](./Phase1.md) §5。兩種連法擇一：stdio 由 Inspector／Cursor 拉起 process；streamable-http 才需要你先開 HTTP，且不要用瀏覽器打開 `/mcp`。網站仍走 `python main.py api`。
+
+```bash
+uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 ```
 
 ---
