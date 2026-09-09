@@ -106,6 +106,8 @@
 
 ### Phase 0 — 收斂介面（先做、範圍小）
 
+落地說明（概念、改了什麼、為何 `commands.md` 看起來沒變）見 [`Phase0.md`](./Phase0.md)。
+
 把「可被 Agent 呼叫」的能力收成穩定 Python function，CLI 與 API 都走這層。現在 `stock_api.py` 大量 `subprocess` 呼叫 script，MCP 若再包一層 script 會更脆。
 
 建議模組：`agent/tools/`（名稱可再定，重點是單一實作）。
