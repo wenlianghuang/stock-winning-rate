@@ -11,7 +11,6 @@ import subprocess
 import sys
 import threading
 import uuid
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -30,6 +29,8 @@ except ImportError as exc:
     raise SystemExit(10) from exc
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 try:
     from dotenv import load_dotenv
@@ -40,9 +41,6 @@ except ModuleNotFoundError:
 STOCK_SKILL_DIR = ROOT / ".agents" / "skills" / "tw-stock-report"
 if str(STOCK_SKILL_DIR) not in sys.path:
     sys.path.insert(0, str(STOCK_SKILL_DIR))
-STOCK_SCRIPT = STOCK_SKILL_DIR / "fetch_chip_report.py"
-GATE_SCRIPT = ROOT / ".agents" / "skills" / "report-gate" / "report_gate.py"
-POSITION_SCRIPT = ROOT / ".agents" / "skills" / "position-gate" / "position_gate.py"
 STOCK_ROOT = ROOT / "reports" / "stock"
 PORTFOLIO_ROOT = ROOT / "reports" / "portfolio"
 PORTFOLIO_SKILL_DIR = ROOT / ".agents" / "skills" / "portfolio-gate"
@@ -52,12 +50,9 @@ PORTFOLIO_MIN_AMOUNT = 50_000
 MARKET_WEEKLY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-weekly"
 MARKET_WEEKLY_SCRIPT = MARKET_WEEKLY_SKILL_DIR / "market_weekly_gate.py"
 MARKET_DAILY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-daily"
-MARKET_DAILY_SCRIPT = MARKET_DAILY_SKILL_DIR / "market_daily_gate.py"
 MARKET_ROOT = ROOT / "reports" / "market"
 WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
-
-AGY_TIMEOUT_SEC = 900
 
 
 class JobStatus(str, Enum):
@@ -334,81 +329,11 @@ def _ensure_import_paths() -> None:
         sys.path.insert(0, ui_text)
 
 
-def _load_agy_helpers():
-    _ensure_import_paths()
-    from agy_output import agy_output_usable, clean_agy_output
-
-    return clean_agy_output, agy_output_usable
-
-
-def resolve_agy_bin() -> str:
-    custom = os.environ.get("AGY_BIN", "").strip()
-    if custom:
-        return custom
-    found = shutil.which("agy")
-    if not found:
-        raise RuntimeError("找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。")
-    return found
-
-
-def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
-    agy_bin = resolve_agy_bin()
-    clean_agy_output, agy_output_usable = _load_agy_helpers()
-    try:
-        result = subprocess.run(
-            [
-                agy_bin,
-                "-p",
-                prompt,
-                "--dangerously-skip-permissions",
-                "--print-timeout",
-                "15m",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
-
-    raw = result.stdout or result.stderr or ""
-    body = clean_agy_output(raw)
-    if not agy_output_usable(body, min_chars=20):
-        detail = body[:200] if body else "(空)"
-        raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
-    return body
-
-
-def build_digest_prompt(digest_date: str, items: list[DigestItem]) -> str:
-    blocks: list[str] = []
-    for idx, item in enumerate(items, start=1):
-        name = item.stock_name or item.stock_id
-        header = f"【{idx}】{name}（{item.stock_id}）"
-        date_hint = f"交易日：{item.trade_date}" if item.trade_date else ""
-        parts = [header, date_hint, "", "=== 市場報告（Markdown）===", item.markdown.strip()]
-        if item.position_markdown and item.position_markdown.strip():
-            parts.extend(["", "=== 部位報告（Markdown）===", item.position_markdown.strip()])
-        blocks.append("\n".join([p for p in parts if p]))
-
-    joined = "\n\n---\n\n".join(blocks)
-    return (
-        "你是一位台股籌碼日報編輯，任務是把同一日多檔報告融合成一封 email 日報。\n"
-        f"日報日期：{digest_date}\n\n"
-        "輸出要求：\n"
-        "- 請輸出 **嚴格 JSON**（不得有多餘文字、不得用 Markdown code fence）\n"
-        '- JSON 只允許以下欄位：{"subject": string, "main_detail_markdown": string}\n'
-        "- subject：一句話總結（含日期），格式建議：YYYY-MM-DD 台股籌碼日報｜{一句話}\n"
-        "- main_detail_markdown：以 Markdown 撰寫 email 內文，結構固定：\n"
-        "  1) 最上方 2 句總結\n"
-        "  2) ## 重點摘要（3～7 點條列）\n"
-        "  3) ## 個股觀察（每檔 2～4 行，避免表格，避免塞大量數字）\n"
-        "  4) ## 風險提醒（最多 3 點）\n"
-        "- 嚴禁臆造不存在於輸入的新聞或數據；不確定就用保守措辭\n"
-        "- 內文要好讀，避免太長（目標 400～900 字）\n\n"
-        "以下是同日多檔報告（輸入即事實來源）：\n\n"
-        f"{joined}\n"
-    )
+def _tool_error(result: Any, fallback: str) -> None:
+    if getattr(result, "ok", False):
+        return
+    detail = getattr(result, "error", None) or fallback
+    raise RuntimeError(detail)
 
 
 def _find_md_path(stock_id: str, trade_date: str | None) -> Path | None:
@@ -474,15 +399,16 @@ def _resolve_history_path(stock_id: str, trade_date: str | None) -> Path | None:
 
 def _fetch_stock_chart_data(stock_id: str, trade_date: str | None) -> None:
     """Fetch chip/price CSVs for one stock (no report-gate / no markdown)."""
-    stock_args = [
-        "--stocks",
-        stock_id,
-        "--chart-lookback-days",
-        str(CHART_LOOKBACK_DAYS),
-    ]
-    if trade_date:
-        stock_args.extend(["--date", trade_date])
-    _run_script(STOCK_SCRIPT, stock_args)
+    from agent.tools.chips import FetchChipsInput, fetch_chips
+
+    result = fetch_chips(
+        FetchChipsInput(
+            stocks=[stock_id],
+            trade_date=trade_date,
+            chart_lookback_days=CHART_LOOKBACK_DAYS,
+        )
+    )
+    _tool_error(result, "fetch_chips failed")
 
 
 def _load_stock_chart_payload(
@@ -617,6 +543,10 @@ def _infer_stock_name_from_csv(csv_path: Path) -> str | None:
 
 
 def _run_pipeline(job_id: str) -> None:
+    from agent.tools.chips import FetchChipsInput, fetch_chips
+    from agent.tools.position import PositionGateInput, run_position_gate
+    from agent.tools.report import ReportGateInput, run_report_gate
+
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job is None:
@@ -627,13 +557,17 @@ def _run_pipeline(job_id: str) -> None:
         with _jobs_lock:
             _update_job(job, status=JobStatus.FETCHING, error=None)
 
-        stock_args = ["--stocks", stock_id, "--chart-lookback-days", str(CHART_LOOKBACK_DAYS)]
-        if job.requested_trade_date:
-            stock_args.extend(["--date", job.requested_trade_date])
-        _run_script(STOCK_SCRIPT, stock_args)
+        fetch_result = fetch_chips(
+            FetchChipsInput(
+                stocks=[stock_id],
+                trade_date=job.requested_trade_date,
+                chart_lookback_days=CHART_LOOKBACK_DAYS,
+            )
+        )
+        _tool_error(fetch_result, "fetch_chips failed")
 
-        csv_path = _find_csv_path(stock_id, job.requested_trade_date)
-        trade_date = csv_path.parent.name if csv_path else _infer_trade_date(stock_id)
+        trade_date = fetch_result.trade_date or job.requested_trade_date
+        csv_path = _find_csv_path(stock_id, trade_date)
         stock_name = _infer_stock_name_from_csv(csv_path) if csv_path else None
 
         with _jobs_lock:
@@ -644,13 +578,14 @@ def _run_pipeline(job_id: str) -> None:
                 stock_name=stock_name,
             )
 
-        gate_args = [stock_id]
-        if job.skip_pdf:
-            gate_args.append("--skip-pdf")
-        if trade_date:
-            gate_args.extend(["--date", trade_date])
-
-        _run_script(GATE_SCRIPT, gate_args)
+        gate_result = run_report_gate(
+            ReportGateInput(
+                stock_id=stock_id,
+                trade_date=trade_date,
+                skip_pdf=job.skip_pdf,
+            )
+        )
+        _tool_error(gate_result, "run_report_gate failed")
 
         md_path = _find_md_path(stock_id, trade_date)
         if md_path is None:
@@ -681,35 +616,21 @@ def _run_pipeline(job_id: str) -> None:
             with _jobs_lock:
                 _update_job(job, status=JobStatus.POSITIONING)
 
-            if has_legs:
-                position_args = [stock_id]
-                if cash_n > 0:
-                    position_args.extend(
-                        ["--cash-shares", str(cash_n), "--cash-cost", str(job.cash_avg_cost)]
-                    )
-                if margin_n > 0:
-                    position_args.extend(
-                        [
-                            "--margin-shares",
-                            str(margin_n),
-                            "--margin-cost",
-                            str(job.margin_avg_cost),
-                        ]
-                    )
-            else:
-                position_args = [
-                    stock_id,
-                    str(job.avg_cost),
-                    str(job.share_count),
-                ]
-                if job.uses_margin:
-                    position_args.append("--margin")
-            if job.skip_pdf:
-                position_args.append("--skip-pdf")
-            if trade_date:
-                position_args.extend(["--date", trade_date])
-
-            _run_script(POSITION_SCRIPT, position_args)
+            position_result = run_position_gate(
+                PositionGateInput(
+                    stock_id=stock_id,
+                    trade_date=trade_date,
+                    avg_cost=job.avg_cost,
+                    share_count=job.share_count,
+                    uses_margin=job.uses_margin,
+                    cash_share_count=job.cash_share_count,
+                    cash_avg_cost=job.cash_avg_cost,
+                    margin_share_count=job.margin_share_count,
+                    margin_avg_cost=job.margin_avg_cost,
+                    skip_pdf=job.skip_pdf,
+                )
+            )
+            _tool_error(position_result, "run_position_gate failed")
 
             position_md_path = _find_position_md_path(stock_id, trade_date)
             if position_md_path is None:
@@ -989,6 +910,8 @@ def _load_market_daily_artifacts(trade_date: str) -> dict[str, Any]:
 
 
 def _run_market_daily_pipeline(job_id: str, max_rounds: int) -> None:
+    from agent.tools.market import MarketDailyInput, run_market_daily
+
     with _market_daily_jobs_lock:
         job = _market_daily_jobs.get(job_id)
     if job is None:
@@ -996,17 +919,17 @@ def _run_market_daily_pipeline(job_id: str, max_rounds: int) -> None:
     try:
         with _market_daily_jobs_lock:
             _update_market_daily_job(job, status=JobStatus.GATING, error=None)
-        args: list[str] = ["--max-rounds", str(max_rounds)]
-        if job.trade_date:
-            args.extend(["--date", job.trade_date])
-        elif job.as_of:
-            args.extend(["--as-of", job.as_of])
-        if job.skip_fetch:
-            args.append("--skip-fetch")
-        if job.skip_us:
-            args.append("--skip-us")
-        _run_script(MARKET_DAILY_SCRIPT, args)
-        trade_date = job.trade_date
+        daily_result = run_market_daily(
+            MarketDailyInput(
+                as_of=job.as_of,
+                trade_date=job.trade_date,
+                max_rounds=max_rounds,
+                skip_fetch=job.skip_fetch,
+                skip_us=job.skip_us,
+            )
+        )
+        _tool_error(daily_result, "run_market_daily failed")
+        trade_date = daily_result.trade_date or job.trade_date
         if not trade_date:
             raise RuntimeError("market-daily job 缺少 trade_date")
         artifacts = _load_market_daily_artifacts(trade_date)
@@ -1044,17 +967,15 @@ def create_app() -> FastAPI:
 
     @app.get("/last-trading-date")
     def last_trading_date(date: str | None = None) -> dict[str, Any]:
-        from twse_calendar import chip_reference_date, resolve_trade_date
+        from agent.tools.dates import get_last_trading_date
 
-        reference = date or chip_reference_date().isoformat()
-        trade_date, note = resolve_trade_date(
-            reference,
-            finmind_token=os.environ.get("FINMIND_TOKEN", ""),
-        )
+        result = get_last_trading_date(date=date)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error or "無法解析交易日")
         return {
-            "reference_date": reference,
-            "trade_date": trade_date,
-            "note": note,
+            "reference_date": result.reference_date,
+            "trade_date": result.trade_date,
+            "note": result.note,
         }
 
     @app.get("/stocks/{stock_id}/chart")
@@ -1111,15 +1032,29 @@ def create_app() -> FastAPI:
 
     @app.post("/digest")
     def create_digest(body: CreateDigestRequest) -> dict[str, Any]:
+        from agent.tools.digest import DigestItem as ToolDigestItem
+        from agent.tools.digest import draft_digest
+
         try:
-            prompt = build_digest_prompt(body.digest_date, body.items)
-            raw = run_agy(prompt)
-            payload = json.loads(raw)
-            subject = str(payload.get("subject", "")).strip()
-            main_detail = str(payload.get("main_detail_markdown", "")).strip()
-            if not subject or not main_detail:
-                raise ValueError("digest JSON 缺少 subject 或 main_detail_markdown")
-            return {"digest": {"subject": subject, "main_detail_markdown": main_detail}}
+            items = [
+                ToolDigestItem(
+                    stock_id=item.stock_id,
+                    stock_name=item.stock_name,
+                    trade_date=item.trade_date,
+                    markdown=item.markdown,
+                    position_markdown=item.position_markdown,
+                )
+                for item in body.items
+            ]
+            result = draft_digest(digest_date=body.digest_date, items=items)
+            if not result.ok:
+                raise RuntimeError(result.error or "draft_digest failed")
+            return {
+                "digest": {
+                    "subject": result.subject,
+                    "main_detail_markdown": result.main_detail_markdown,
+                }
+            }
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=502, detail=f"Digest JSON 解析失敗：{exc}") from exc
         except Exception as exc:

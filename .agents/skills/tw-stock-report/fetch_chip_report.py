@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -176,10 +177,14 @@ def shares_to_lots(value: int | float | None) -> int | str:
 
 
 def load_stock_ids(
-    stocks_arg: str | None, watchlist_path: Path | None
+    stocks_arg: str | list[str] | None, watchlist_path: Path | None
 ) -> list[str]:
-    if stocks_arg:
-        return [s.strip() for s in stocks_arg.split(",") if s.strip()]
+    if isinstance(stocks_arg, list):
+        ids = [str(s).strip() for s in stocks_arg if str(s).strip()]
+        if ids:
+            return ids
+    elif stocks_arg:
+        return [s.strip() for s in str(stocks_arg).split(",") if s.strip()]
 
     path = watchlist_path or DEFAULT_WATCHLIST
     if not path.exists():
@@ -194,9 +199,6 @@ def load_stock_ids(
     if not stock_ids:
         raise ValueError(f"watchlist 為空: {path}")
     return stock_ids
-
-
-from twse_calendar import resolve_lookback_dates, resolve_trade_date
 
 
 def load_stock_names(client: FinMindClient) -> dict[str, str]:
@@ -1171,8 +1173,13 @@ def build_stock_report(
     return snapshot, daily_rows, chart_history
 
 
-def stock_report_dir(trade_date: str) -> Path:
-    path = Path.cwd() / "reports" / "stock" / trade_date
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def stock_report_dir(trade_date: str, *, root: Path | None = None) -> Path:
+    base = Path(root) if root is not None else project_root()
+    path = base / "reports" / "stock" / trade_date
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -1203,7 +1210,114 @@ def _load_chip_signals():
     return build_chip_facts, write_facts_json
 
 
-def parse_args() -> argparse.Namespace:
+@dataclass
+class FetchRunResult:
+    trade_date: str
+    date_note: str | None
+    output_dir: Path
+    snapshot_paths: list[Path] = field(default_factory=list)
+    history_paths: list[Path] = field(default_factory=list)
+    chart_history_paths: list[Path] = field(default_factory=list)
+    lookback_dates: list[str] = field(default_factory=list)
+    chart_lookback_days: int = DEFAULT_CHART_LOOKBACK_DAYS
+
+
+def run_fetch(
+    *,
+    stocks: str | list[str] | None = None,
+    date: str | None = None,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    chart_lookback_days: int = DEFAULT_CHART_LOOKBACK_DAYS,
+    watchlist: Path | None = None,
+    skip_major: bool = False,
+    token: str | None = None,
+) -> FetchRunResult:
+    """Fetch chip CSVs for one or more stocks. Raises on failure."""
+    auth = (token if token is not None else os.environ.get("FINMIND_TOKEN", "")).strip()
+    lookback_days = max(1, lookback_days)
+    chart_lookback_days = max(MA20_PERIOD, chart_lookback_days)
+
+    stock_ids = load_stock_ids(stocks, watchlist)
+    client = FinMindClient(token=auth)
+    trade_date, date_note = resolve_trade_date(date, finmind_token=auth)
+    lookback_dates = resolve_lookback_dates(trade_date, lookback_days)
+    stock_names = load_stock_names(client)
+    yahoo = None if skip_major else YahooMajorFlowClient()
+    market_context = fetch_market_context(client, trade_date, lookback_dates)
+
+    output_dir = stock_report_dir(trade_date)
+    snapshot_paths: list[Path] = []
+    history_paths: list[Path] = []
+    chart_history_paths: list[Path] = []
+
+    for stock_id in stock_ids:
+        snapshot, history, chart_history = build_stock_report(
+            client,
+            stock_id,
+            stock_names.get(stock_id, ""),
+            trade_date,
+            lookback_dates,
+            yahoo,
+            market_context=market_context,
+            chart_lookback_days=chart_lookback_days,
+        )
+
+        snapshot_path = stock_csv_path(trade_date, stock_id)
+        history_path = stock_history_csv_path(trade_date, stock_id)
+        chart_history_path = stock_chart_history_csv_path(trade_date, stock_id)
+
+        snapshot_columns = DAILY_COLUMNS + SUMMARY_COLUMNS + MARKET_COLUMNS
+        pd.DataFrame([snapshot], columns=snapshot_columns).to_csv(
+            snapshot_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.DataFrame(history, columns=DAILY_COLUMNS).to_csv(
+            history_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.DataFrame(chart_history, columns=CHART_HISTORY_COLUMNS).to_csv(
+            chart_history_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+        snapshot_paths.append(snapshot_path)
+        history_paths.append(history_path)
+        chart_history_paths.append(chart_history_path)
+
+        try:
+            build_chip_facts, write_facts_json = _load_chip_signals()
+            facts = build_chip_facts(snapshot, history)
+            write_facts_json(stock_facts_json_path(trade_date, stock_id), facts)
+        except Exception as facts_exc:  # facts 為附加產物，失敗不應中斷抓取
+            print(
+                f"WARNING: {stock_id} facts.json 產生失敗：{facts_exc}",
+                file=sys.stderr,
+            )
+
+        if yahoo is not None:
+            major_days = snapshot.get("區間主力資料天數", 0)
+            print(
+                f"{stock_id}: 回看 {len(history)} 日（{lookback_dates[0]}～{trade_date}），"
+                f"主力資料 {major_days}/{len(history)} 日",
+                file=sys.stderr,
+            )
+
+    return FetchRunResult(
+        trade_date=trade_date,
+        date_note=date_note,
+        output_dir=output_dir,
+        snapshot_paths=snapshot_paths,
+        history_paths=history_paths,
+        chart_history_paths=chart_history_paths,
+        lookback_dates=lookback_dates,
+        chart_lookback_days=chart_lookback_days,
+    )
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="抓取台股個股籌碼資料並輸出 CSV 表格"
     )
@@ -1241,102 +1355,43 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="略過 Yahoo 主力進出（僅 FinMind 欄位）",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
-    token = os.environ.get("FINMIND_TOKEN", "").strip()
-    lookback_days = max(1, args.lookback_days)
-    chart_lookback_days = max(MA20_PERIOD, args.chart_lookback_days)
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
 
     try:
-        stock_ids = load_stock_ids(args.stocks, args.watchlist)
-        client = FinMindClient(token=token)
-        trade_date, date_note = resolve_trade_date(args.date, finmind_token=token)
-        lookback_dates = resolve_lookback_dates(trade_date, lookback_days)
-        stock_names = load_stock_names(client)
-        yahoo = None if args.skip_major else YahooMajorFlowClient()
-        market_context = fetch_market_context(client, trade_date, lookback_dates)
-
-        output_dir = stock_report_dir(trade_date)
-        snapshot_paths: list[Path] = []
-        history_paths: list[Path] = []
-        chart_history_paths: list[Path] = []
-
-        for stock_id in stock_ids:
-            snapshot, history, chart_history = build_stock_report(
-                client,
-                stock_id,
-                stock_names.get(stock_id, ""),
-                trade_date,
-                lookback_dates,
-                yahoo,
-                market_context=market_context,
-                chart_lookback_days=chart_lookback_days,
-            )
-
-            snapshot_path = stock_csv_path(trade_date, stock_id)
-            history_path = stock_history_csv_path(trade_date, stock_id)
-            chart_history_path = stock_chart_history_csv_path(trade_date, stock_id)
-
-            snapshot_columns = DAILY_COLUMNS + SUMMARY_COLUMNS + MARKET_COLUMNS
-            pd.DataFrame([snapshot], columns=snapshot_columns).to_csv(
-                snapshot_path,
-                index=False,
-                encoding="utf-8-sig",
-            )
-            pd.DataFrame(history, columns=DAILY_COLUMNS).to_csv(
-                history_path,
-                index=False,
-                encoding="utf-8-sig",
-            )
-            pd.DataFrame(chart_history, columns=CHART_HISTORY_COLUMNS).to_csv(
-                chart_history_path,
-                index=False,
-                encoding="utf-8-sig",
-            )
-
-            snapshot_paths.append(snapshot_path)
-            history_paths.append(history_path)
-            chart_history_paths.append(chart_history_path)
-
-            try:
-                build_chip_facts, write_facts_json = _load_chip_signals()
-                facts = build_chip_facts(snapshot, history)
-                write_facts_json(
-                    stock_facts_json_path(trade_date, stock_id), facts
-                )
-            except Exception as facts_exc:  # facts 為附加產物，失敗不應中斷抓取
-                print(
-                    f"WARNING: {stock_id} facts.json 產生失敗：{facts_exc}",
-                    file=sys.stderr,
-                )
-
-            if yahoo is not None:
-                major_days = snapshot.get("區間主力資料天數", 0)
-                print(
-                    f"{stock_id}: 回看 {len(history)} 日（{lookback_dates[0]}～{trade_date}），"
-                    f"主力資料 {major_days}/{len(history)} 日",
-                    file=sys.stderr,
-                )
-
-        print(f"交易日期: {trade_date}")
-        print(f"回看天數: {len(lookback_dates)}（{lookback_dates[0]}～{trade_date}）")
-        if chart_history_paths:
+        result = run_fetch(
+            stocks=args.stocks,
+            date=args.date,
+            lookback_days=args.lookback_days,
+            chart_lookback_days=args.chart_lookback_days,
+            watchlist=args.watchlist,
+            skip_major=args.skip_major,
+        )
+        lookback_dates = result.lookback_dates
+        print(f"交易日期: {result.trade_date}")
+        if lookback_dates:
             print(
-                f"圖表回看: {chart_lookback_days} 交易日（檔案: *_chart_history.csv）"
+                f"回看天數: {len(lookback_dates)}"
+                f"（{lookback_dates[0]}～{result.trade_date}）"
             )
-        if date_note:
-            print(date_note)
-        print(f"輸出目錄: {output_dir.resolve()}")
-        for csv_path in snapshot_paths:
+        if result.chart_history_paths:
+            print(
+                f"圖表回看: {result.chart_lookback_days} 交易日"
+                f"（檔案: *_chart_history.csv）"
+            )
+        if result.date_note:
+            print(result.date_note)
+        print(f"輸出目錄: {result.output_dir.resolve()}")
+        for csv_path in result.snapshot_paths:
             print(f"輸出檔案: {csv_path.resolve()}")
-        for csv_path in history_paths:
+        for csv_path in result.history_paths:
             print(f"歷史檔案: {csv_path.resolve()}")
-        for csv_path in chart_history_paths:
+        for csv_path in result.chart_history_paths:
             print(f"圖表歷史: {csv_path.resolve()}")
-        print(f"股票檔數: {len(snapshot_paths)}")
+        print(f"股票檔數: {len(result.snapshot_paths)}")
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
