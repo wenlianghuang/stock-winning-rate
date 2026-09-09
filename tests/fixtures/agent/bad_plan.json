@@ -1,0 +1,4 @@
+{
+  "intent_kind": "market_outlook",
+  "steps": [{"tool": "rm_rf", "args": {}}]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "market_outlook",
+  "intent": "明天開盤怎麼看",
+  "context": {
+    "trade_date": "2026-08-18",
+    "holdings": {},
+    "csv_missing": [],
+    "daily_facts_present": false
+  },
+  "expect_intent_kind": "market_outlook",
+  "expect_tools": ["run_market_daily", "answer_market_chat"],
+  "forbid_tools": ["run_position_gate", "run_report_gate", "send_digest"],
+  "expect_digest_status": "not_applicable",
+  "expect_notes_any": []
+}

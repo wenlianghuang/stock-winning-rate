@@ -148,6 +148,8 @@
 
 ### Phase 2 — Orchestrator（自主決策）
 
+落地說明（意圖分類、policy、CLI、golden fixtures）見 [`Phase2.md`](./Phase2.md)。
+
 使用者不再指定 `/gate` 或 `/position`，只給意圖。
 
 例子：

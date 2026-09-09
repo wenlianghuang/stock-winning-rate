@@ -1,0 +1,22 @@
+{
+  "id": "process_holdings",
+  "intent": "幫我處理今天持股",
+  "context": {
+    "trade_date": "2026-08-18",
+    "holdings": {
+      "2409": {"avg_cost": 32.5, "shares": 500000, "note": "fixture"}
+    },
+    "csv_missing": ["2409"],
+    "daily_facts_present": false
+  },
+  "expect_intent_kind": "process_holdings",
+  "expect_tools": [
+    "fetch_chips",
+    "run_report_gate",
+    "run_position_gate",
+    "draft_digest"
+  ],
+  "forbid_tools": ["send_digest"],
+  "expect_digest_status": "pending_approval",
+  "expect_notes_any": ["待核准"]
+}

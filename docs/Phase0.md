@@ -45,7 +45,7 @@ Phase 0 要解的問題不是「更好看的報告」，而是 **同一件事有
 
 skills 不 import `agent`（避免循環）。`agent.tools` 包現有模組；skill CLI 的 `main()` 也改呼叫抽出來的核心（例如 `run_fetch`），這樣「單一實作」成立。
 
-尚未建立（留給後續 Phase）：`agent/mcp_server.py`、`orchestrator.py`、`policy.py`、`audit.py`、`llm.py`。
+尚未建立（留給後續 Phase）：`audit.py`、`llm.py`。Phase 2 見 [`Phase2.md`](./Phase2.md)。
 
 ---
 
@@ -162,7 +162,7 @@ uv run --extra ui --extra stock python main.py report-gate -- 2409 --skip-pdf
 
 產物仍在 `reports/stock/{日期}/`、`reports/market/{日期}/`。
 
-會「感覺不一樣」的是 Phase 2：一句話意圖 → plan → 自動選 tool。現在還沒有。
+會「感覺不一樣」的是 Phase 2：一句話意圖 → plan → 自動選 tool。見 [`Phase2.md`](./Phase2.md)。
 
 ---
 

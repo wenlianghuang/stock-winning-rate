@@ -1,0 +1,17 @@
+{
+  "id": "stock_no_holding",
+  "intent": "2330 要不要動",
+  "context": {
+    "trade_date": "2026-08-18",
+    "holdings": {
+      "2409": {"avg_cost": 32.5, "shares": 500000, "note": "fixture"}
+    },
+    "csv_missing": ["2330"],
+    "daily_facts_present": false
+  },
+  "expect_intent_kind": "stock_decision",
+  "expect_tools": ["fetch_chips", "run_report_gate"],
+  "forbid_tools": ["run_position_gate", "draft_digest", "send_digest"],
+  "expect_digest_status": "not_applicable",
+  "expect_notes_any": ["無持倉"]
+}

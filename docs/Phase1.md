@@ -44,7 +44,7 @@ python main.py mcp
 
 `api/stock_api.py` **沒有刪**。網站 job 繼續 HTTP；MCP 是給 Agent 的介面。
 
-尚未建立（留給後續 Phase）：`orchestrator.py`、`policy.py`、`audit.py`、`llm.py`。沒有 `python main.py agent`。
+Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。尚未建立：`audit.py`、`llm.py`。
 
 ---
 
@@ -146,7 +146,7 @@ uv run --extra ui --extra stock python main.py report-gate -- 2330 --skip-pdf
 uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 ```
 
-產物路徑不變：`reports/stock/{日期}/`。會「感覺不一樣」的是 Phase 2：一句話意圖 → plan → 自動選 tool。現在還沒有。
+產物路徑不變：`reports/stock/{日期}/`。一句話意圖 → plan 見 [`Phase2.md`](./Phase2.md)。
 
 下面兩種才是「讓 Agent／Inspector 真的呼叫 tools」。**擇一即可，不要混用。**
 
@@ -299,5 +299,5 @@ Connect → List Tools，之後呼叫順序與 §5.1 相同。這句「連 URL�
 
 ## 8. 下一階段
 
-Phase 2（[`agent-roadmap.md`](./agent-roadmap.md)）：`python main.py agent -- "幫我處理今天持股"`。LLM 只做意圖 → 結構化 plan；執行仍呼叫本層 MCP／`agent.tools`。`send_digest` 預設繼續 blocked。
+Phase 2 落地見 [`Phase2.md`](./Phase2.md)：`python main.py agent -- "幫我處理今天持股"`。LLM 只做意圖 → 結構化 plan；執行仍呼叫本層 MCP／`agent.tools`。`send_digest` 預設繼續 blocked。
 
