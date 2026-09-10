@@ -1,12 +1,17 @@
-"""Phase 2 orchestrator policy: testable rules, not left to the model.
+"""Orchestrator policy: testable rules, not left to the model.
 
-Rules (agent-roadmap Phase 2):
+Phase 2 rules:
 1. Missing data first (Data), then Research.
 2. No holdings → do not run Position.
 3. Gate failure returns to the same specialist until pass or max_rounds
    (implemented by existing gate tools; orchestrator passes max_rounds).
 4. send_digest is blocked by default; only a draft + pending-approval.
 5. Each run has a tool budget (call count / elapsed time).
+
+Phase 3 adds role allowlists, human-gate permissions, Research facts before
+Position (or explicit skip_research), and Notify-only-passed-artifacts.
+The Research → Validator loop stays inside report-gate; policy only decides
+who may call which tool and when a handoff is legal.
 """
 
 from __future__ import annotations
@@ -39,6 +44,70 @@ GATE_TOOLS = frozenset({"run_report_gate", "run_position_gate", "run_market_dail
 NOTIFY_TOOLS = frozenset({"draft_digest", "send_digest"})
 NEEDS_CSV_TOOLS = frozenset({"run_report_gate", "run_position_gate", "build_chip_facts"})
 
+ROLE_ORCHESTRATOR = "orchestrator"
+ROLE_DATA = "data"
+ROLE_RESEARCH = "research"
+ROLE_VALIDATOR = "validator"
+ROLE_POSITION = "position"
+ROLE_NOTIFY = "notify"
+ROLE_CHAT = "chat"
+
+KNOWN_ROLES = frozenset(
+    {
+        ROLE_ORCHESTRATOR,
+        ROLE_DATA,
+        ROLE_RESEARCH,
+        ROLE_VALIDATOR,
+        ROLE_POSITION,
+        ROLE_NOTIFY,
+        ROLE_CHAT,
+    }
+)
+
+# Actor that owns a tool when the orchestrator records a handoff / audit line.
+TOOL_ACTOR: dict[str, str] = {
+    "get_last_trading_date": ROLE_DATA,
+    "get_holdings": ROLE_DATA,
+    "fetch_chips": ROLE_DATA,
+    "build_chip_facts": ROLE_DATA,
+    "run_report_gate": ROLE_RESEARCH,
+    "run_market_daily": ROLE_RESEARCH,
+    "answer_market_chat": ROLE_CHAT,
+    "run_position_gate": ROLE_POSITION,
+    "draft_digest": ROLE_NOTIFY,
+    "send_digest": ROLE_NOTIFY,
+}
+
+ROLE_ALLOWLIST: dict[str, frozenset[str]] = {
+    ROLE_ORCHESTRATOR: ALLOWED_TOOLS,
+    ROLE_DATA: DATA_TOOLS | frozenset({"get_holdings"}),
+    ROLE_RESEARCH: DATA_TOOLS | RESEARCH_TOOLS,
+    ROLE_VALIDATOR: frozenset(),
+    ROLE_POSITION: POSITION_TOOLS | frozenset({"get_holdings", "get_last_trading_date"}),
+    ROLE_NOTIFY: NOTIFY_TOOLS,
+    ROLE_CHAT: frozenset(
+        {
+            "answer_market_chat",
+            "get_last_trading_date",
+            "get_holdings",
+            "run_market_daily",
+        }
+    ),
+}
+
+# Never exposed. The system outputs research / position scenarios only.
+FORBIDDEN_BROKER_TOOLS = frozenset(
+    {
+        "place_order",
+        "submit_order",
+        "broker_buy",
+        "broker_sell",
+        "send_order",
+        "update_holdings",
+        "mutate_holdings",
+    }
+)
+
 INTENT_PROCESS_HOLDINGS = "process_holdings"
 INTENT_STOCK_DECISION = "stock_decision"
 INTENT_MARKET_OUTLOOK = "market_outlook"
@@ -51,6 +120,41 @@ DIGEST_BLOCKED = "blocked"
 DEFAULT_MAX_TOOL_CALLS = 32
 DEFAULT_MAX_ELAPSED_SEC = 1800.0
 DEFAULT_MAX_GATE_ROUNDS = 8
+
+
+@dataclass
+class Permissions:
+    """Run-level grants. send_digest stays off unless a human turns it on."""
+
+    role: str = ROLE_ORCHESTRATOR
+    allow_send_digest: bool = False
+    allow_mutate_holdings: bool = False
+    skip_research: bool = False
+
+
+def role_for_intent(intent_kind: str) -> str:
+    if intent_kind == INTENT_MARKET_OUTLOOK:
+        return ROLE_CHAT
+    return ROLE_ORCHESTRATOR
+
+
+def actor_for_tool(tool: str) -> str:
+    return TOOL_ACTOR.get(tool, ROLE_ORCHESTRATOR)
+
+
+def tool_allowed_for_role(tool: str, role: str) -> tuple[bool, str]:
+    if role not in KNOWN_ROLES:
+        return False, f"未知角色：{role}"
+    allowlist = ROLE_ALLOWLIST.get(role, frozenset())
+    if tool not in allowlist:
+        return False, f"角色 {role} 不允許 {tool}"
+    return True, ""
+
+
+def allow_mutate_holdings(*, permissions: Permissions | None = None) -> tuple[bool, str]:
+    """Holdings edits and broker orders are never granted."""
+    del permissions
+    return False, "禁止自動改持股／下單；本系統只輸出研究與部位情境"
 
 
 @dataclass
@@ -113,8 +217,18 @@ def allow_position(stock_id: str, holdings: dict[str, Any]) -> tuple[bool, str]:
     return True, f"{sid} 有均價／張數，跑 position-gate"
 
 
-def allow_send_digest(*, approved: bool) -> tuple[bool, str]:
-    """Rule 4: send is blocked unless a human approved. Orchestrator never self-approves."""
+def allow_send_digest(
+    *,
+    approved: bool,
+    permissions: Permissions | None = None,
+) -> tuple[bool, str]:
+    """Human gate + role allowlist. Orchestrator never self-approves."""
+    perms = permissions or Permissions()
+    allowed_role, role_reason = tool_allowed_for_role("send_digest", perms.role)
+    if not allowed_role:
+        return False, role_reason
+    if not perms.allow_send_digest:
+        return False, "send_digest 權限關閉，流程停在草稿（blocked）"
     if not approved:
         return False, "send_digest 預設 blocked，只產生草稿與待核准狀態"
     return True, "send_digest 已核准（本 repo 仍不寄信）"
@@ -135,6 +249,36 @@ def should_retry_after_csv_missing(tool: str, exit_code: int) -> bool:
 def skip_position_after_failed_research(*, report_ok: bool) -> bool:
     """Do not run position if the same stock's report-gate did not pass."""
     return not report_ok
+
+
+def allow_position_handoff(
+    stock_id: str,
+    holdings: dict[str, Any],
+    *,
+    report_ok: bool,
+    facts_ready: bool,
+    skip_research: bool = False,
+) -> tuple[bool, str]:
+    """Position starts only with Research facts, unless skip_research is explicit."""
+    allowed, reason = allow_position(stock_id, holdings)
+    if not allowed:
+        return allowed, reason
+    if skip_research:
+        return True, f"{stock_id} skip_research：Position 不要求本輪 Research facts"
+    if not report_ok:
+        return False, f"{stock_id} report-gate 未通過，不跑 position"
+    if not facts_ready:
+        return False, f"{stock_id} 缺少 Research facts，不跑 position"
+    return True, reason
+
+
+def notify_may_include(*, report_passed: bool) -> bool:
+    """Notify only receives artifacts that already passed a gate."""
+    return report_passed
+
+
+def broker_tools_exposed() -> frozenset[str]:
+    return ALLOWED_TOOLS & FORBIDDEN_BROKER_TOOLS
 
 
 def validate_plan_schema(data: dict[str, Any]) -> list[str]:

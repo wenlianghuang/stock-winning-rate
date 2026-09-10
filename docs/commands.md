@@ -106,9 +106,9 @@ uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 
 ---
 
-## Orchestrator（一句話意圖，Phase 2）
+## Orchestrator（一句話意圖，Phase 2–3）
 
-細節見 [`Phase2.md`](./Phase2.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 預設不寄，只產草稿並標待核准。
+細節見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 權限預設關閉，只產草稿並標待核准。實際執行會寫 `reports/agent/{日期}/run_{id}.jsonl`。
 
 ```bash
 # 處理 holdings.json 裡有均價／張數的標的（fetch → report-gate → position-gate → digest 草稿）
@@ -120,8 +120,14 @@ uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18
 # 無持倉：只 research，並說明為什麼沒跑部位
 uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "2330 要不要動"
 
-# 開盤路況：日報（若尚無 facts）→ grounded chat
+# 開盤路況：日報（若尚無 facts）→ grounded chat（角色 chat，不得 send_digest）
 uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "明天開盤怎麼看"
+
+# 演示 allowlist：chat 角色拆掉 report / position / draft
+uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 --role chat -- "幫我處理今天持股"
+
+# 重放 audit（不執行 tools）
+uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026-08-18/run_<id>.jsonl
 ```
 
 ---

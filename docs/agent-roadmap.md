@@ -177,6 +177,8 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 
 ### Phase 3 — 多 Agent 交接與權限
 
+落地說明（角色 allowlist、Research↔Validator 交接、JSONL audit／replay）見 [`Phase3.md`](./Phase3.md)。
+
 把 Phase 2 的內部步驟顯式化成交接，方便講 A2A，也方便審計。
 
 - Research 失敗 → Validator 產出 issue list → Research 再跑（現有 loop 的多角色版）。

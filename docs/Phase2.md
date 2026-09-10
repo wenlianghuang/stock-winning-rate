@@ -43,7 +43,7 @@ LLM 在這一層 **只允許** 填 plan JSON（可選 `--plan-json`）。預設 
 
 MCP server **沒有刪**。Cursor／Inspector 仍可單點呼叫 tools；Orchestrator 是「一句話」這條路。
 
-尚未建立（留給 Phase 3–4）：`audit.py` JSONL、角色 allowlist、排程、`llm.py` adapter。
+尚未建立（留給 Phase 4）：`llm.py` adapter、排程。Phase 3 已落地：`audit.py` JSONL、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。
 
 ---
 
@@ -210,6 +210,6 @@ Notes:
 
 ## 8. 下一階段
 
-Phase 3（[`agent-roadmap.md`](./agent-roadmap.md)）：把本層內部步驟顯式化成交接（Research → Validator → Position），補 tool allowlist、JSONL audit、關掉 `send_digest` 權限時流程停在草稿。Phase 2 已經保證 send 預設 blocked；Phase 3 要的是可重放的 log 與依角色的 allowlist。
+Phase 3 落地見 [`Phase3.md`](./Phase3.md)：角色 allowlist、Research → Validator → Position 交接、JSONL audit 可重放；關掉 `send_digest` 權限時流程停在草稿。Phase 2 已經保證 send 預設 blocked；Phase 3 補上可重放的 log 與依角色的 allowlist。
 
 面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。

@@ -45,7 +45,7 @@ Phase 0 要解的問題不是「更好看的報告」，而是 **同一件事有
 
 skills 不 import `agent`（避免循環）。`agent.tools` 包現有模組；skill CLI 的 `main()` 也改呼叫抽出來的核心（例如 `run_fetch`），這樣「單一實作」成立。
 
-尚未建立（留給後續 Phase）：`audit.py`、`llm.py`。Phase 2 見 [`Phase2.md`](./Phase2.md)。
+尚未建立（留給 Phase 4）：`llm.py` adapter、收盤後排程。Phase 2 見 [`Phase2.md`](./Phase2.md)；Phase 3 見 [`Phase3.md`](./Phase3.md)（`audit.py` 已落地）。
 
 ---
 

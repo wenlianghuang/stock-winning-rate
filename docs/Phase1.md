@@ -44,7 +44,7 @@ python main.py mcp
 
 `api/stock_api.py` **沒有刪**。網站 job 繼續 HTTP；MCP 是給 Agent 的介面。
 
-Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。尚未建立：`audit.py`、`llm.py`。
+Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。Phase 3 已落地：`audit.py`、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。尚未建立：`llm.py`。
 
 ---
 
@@ -299,5 +299,5 @@ Connect → List Tools，之後呼叫順序與 §5.1 相同。這句「連 URL�
 
 ## 8. 下一階段
 
-Phase 2 落地見 [`Phase2.md`](./Phase2.md)：`python main.py agent -- "幫我處理今天持股"`。LLM 只做意圖 → 結構化 plan；執行仍呼叫本層 MCP／`agent.tools`。`send_digest` 預設繼續 blocked。
+Phase 2 落地見 [`Phase2.md`](./Phase2.md)；Phase 3 落地見 [`Phase3.md`](./Phase3.md)。LLM 只做意圖 → 結構化 plan；執行仍呼叫本層 MCP／`agent.tools`。`send_digest` 預設繼續 blocked，audit 可重放。
 

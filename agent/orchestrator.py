@@ -1,9 +1,12 @@
-"""Phase 2 orchestrator: intent → structured plan → policy-checked execution.
+"""Orchestrator: intent → structured plan → policy-checked execution.
+
+Phase 2: rule-based planner, schema + policy, tool budget, send_digest blocked.
+Phase 3: role allowlists, Research→Validator→Position handoffs, JSONL audit.
 
 The default planner is rule-based (golden intents, no LLM). An external model
 may only emit the same plan JSON (``--plan-json``); schema + policy run before
 any tool. Execution failures use rules to retry once on missing CSV, skip
-position without holdings, block send_digest, and stop at the tool budget.
+position without Research facts, block send_digest, and stop at the tool budget.
 """
 
 from __future__ import annotations
@@ -18,6 +21,17 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from agent.audit import (
+    AuditLog,
+    Handoff,
+    default_audit_path,
+    format_replay,
+    gate_rounds_from_payload,
+    handoffs_from_gate_rounds,
+    load_audit,
+    new_run_id,
+    replay_audit,
+)
 from agent.policy import (
     ALLOWED_TOOLS,
     DEFAULT_MAX_ELAPSED_SEC,
@@ -30,13 +44,23 @@ from agent.policy import (
     INTENT_MARKET_OUTLOOK,
     INTENT_PROCESS_HOLDINGS,
     INTENT_STOCK_DECISION,
+    KNOWN_ROLES,
     NEEDS_CSV_TOOLS,
+    ROLE_DATA,
+    ROLE_ORCHESTRATOR,
+    ROLE_RESEARCH,
+    ROLE_VALIDATOR,
     Budget,
+    Permissions,
+    actor_for_tool,
     allow_position,
+    allow_position_handoff,
     allow_send_digest,
     is_actionable_holding,
+    notify_may_include,
+    role_for_intent,
     should_retry_after_csv_missing,
-    skip_position_after_failed_research,
+    tool_allowed_for_role,
     validate_plan_schema,
 )
 from agent.tools._paths import ROOT
@@ -88,6 +112,7 @@ class PlanStep:
     tool: str
     args: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
+    actor: str = ""
 
 
 @dataclass
@@ -114,6 +139,8 @@ class StepResult:
     summary: str = ""
     elapsed_ms: int = 0
     superseded: bool = False
+    actor: str = ""
+    issue_codes: list[str] = field(default_factory=list)
     result: dict[str, Any] = field(default_factory=dict)
 
 
@@ -132,6 +159,12 @@ class AgentContext:
     max_elapsed_sec: float = DEFAULT_MAX_ELAPSED_SEC
     approve_send: bool = False
     dry_run: bool = False
+    role: str | None = None
+    permissions: Permissions | None = None
+    skip_research: bool = False
+    run_id: str | None = None
+    audit_enabled: bool = False
+    audit_path: Path | str | None = None
 
 
 @dataclass
@@ -150,6 +183,11 @@ class AgentRun:
     budget_calls: int = 0
     budget_max: int = DEFAULT_MAX_TOOL_CALLS
     dry_run: bool = False
+    run_id: str = ""
+    role: str = ROLE_ORCHESTRATOR
+    handoffs: list[Handoff] = field(default_factory=list)
+    audit_path: str | None = None
+    permissions: Permissions = field(default_factory=Permissions)
 
 
 def classify_intent(text: str) -> ClassifiedIntent:
@@ -182,13 +220,29 @@ def daily_facts_exist(trade_date: str | None) -> bool:
     return path.is_file()
 
 
+def research_facts_exist(stock_id: str, trade_date: str | None) -> bool:
+    stock_root = ROOT / "reports" / "stock"
+    name = f"tw_stock_{stock_id}.facts.json"
+    if trade_date:
+        return (stock_root / trade_date / name).is_file()
+    if not stock_root.exists():
+        return False
+    return any(stock_root.glob(f"*/{name}"))
+
+
 def plan_to_dict(plan: Plan) -> dict[str, Any]:
     return {
         "intent": plan.intent,
         "intent_kind": plan.intent_kind,
         "trade_date": plan.trade_date,
         "steps": [
-            {"tool": step.tool, "args": step.args, "reason": step.reason} for step in plan.steps
+            {
+                "tool": step.tool,
+                "args": step.args,
+                "reason": step.reason,
+                "actor": step.actor or actor_for_tool(step.tool),
+            }
+            for step in plan.steps
         ],
         "notes": list(plan.notes),
         "digest_status": plan.digest_status,
@@ -204,6 +258,7 @@ def plan_from_dict(data: dict[str, Any], *, fallback_intent: str = "") -> Plan:
             tool=str(step["tool"]),
             args=dict(step.get("args") or {}),
             reason=str(step.get("reason") or ""),
+            actor=str(step.get("actor") or actor_for_tool(str(step["tool"]))),
         )
         for step in data.get("steps") or []
     ]
@@ -226,14 +281,21 @@ def apply_policy(
     *,
     csv_missing: set[str],
     approve_send: bool = False,
+    permissions: Permissions | None = None,
 ) -> Plan:
     """Strip illegal steps and insert fetch_chips when research would hit missing CSV."""
+    perms = permissions or Permissions(role=role_for_intent(plan.intent_kind))
     notes = list(plan.notes)
     filtered: list[PlanStep] = []
     for step in plan.steps:
         if step.tool not in ALLOWED_TOOLS:
             notes.append(f"移除未知 tool：{step.tool}")
             continue
+        allowed_role, role_reason = tool_allowed_for_role(step.tool, perms.role)
+        if not allowed_role:
+            notes.append(role_reason)
+            continue
+        actor = step.actor or actor_for_tool(step.tool)
         if step.tool == "run_position_gate":
             stock_id = str(step.args.get("stock_id") or "")
             allowed, reason = allow_position(stock_id, holdings)
@@ -242,7 +304,9 @@ def apply_policy(
                 continue
         if step.tool == "send_digest":
             # Never trust approved=true from a model-produced plan.
-            allowed, reason = allow_send_digest(approved=approve_send)
+            allowed, reason = allow_send_digest(
+                approved=approve_send, permissions=perms
+            )
             if not allowed:
                 notes.append(reason)
                 plan = Plan(
@@ -255,7 +319,9 @@ def apply_policy(
                 )
                 continue
             step.args = {**step.args, "approved": True}
-        filtered.append(step)
+        filtered.append(
+            PlanStep(tool=step.tool, args=step.args, reason=step.reason, actor=actor)
+        )
 
     covered: set[str] = set()
     for step in filtered:
@@ -289,6 +355,7 @@ def apply_policy(
                 tool="fetch_chips",
                 args=fetch_args,
                 reason="缺 CSV，先 Data 再 Research",
+                actor=ROLE_DATA,
             ),
         )
         notes.append(f"已插入 fetch_chips：{', '.join(need_fetch)}")
@@ -316,6 +383,7 @@ def build_plan(
     skip_pdf: bool = True,
     skip_tavily: bool = True,
     max_rounds: int = DEFAULT_MAX_GATE_ROUNDS,
+    permissions: Permissions | None = None,
 ) -> Plan:
     if classified.kind == INTENT_PROCESS_HOLDINGS:
         plan = _plan_process_holdings(
@@ -344,7 +412,8 @@ def build_plan(
             skip_tavily=skip_tavily,
             max_rounds=max_rounds,
         )
-    return apply_policy(plan, holdings, csv_missing=csv_missing, approve_send=False)
+    perms = permissions or Permissions(role=role_for_intent(classified.kind))
+    return apply_policy(plan, holdings, csv_missing=csv_missing, approve_send=False, permissions=perms)
 
 
 def _gate_args(
@@ -631,6 +700,7 @@ def _call(
     skip_reason: str | None = None,
 ) -> StepResult:
     if skipped:
+        actor = actor_for_tool(tool)
         return StepResult(
             tool=tool,
             args=args,
@@ -640,9 +710,11 @@ def _call(
             skipped=True,
             skip_reason=skip_reason,
             summary=skip_reason or "skipped",
+            actor=actor,
         )
     blocked = budget.consume()
     if blocked:
+        actor = actor_for_tool(tool)
         return StepResult(
             tool=tool,
             args=args,
@@ -653,12 +725,16 @@ def _call(
             skip_reason=blocked,
             error=blocked,
             summary=blocked,
+            actor=actor,
         )
     started = time.monotonic()
     raw = dispatch(tool, args)
     payload = _result_payload(raw)
     ok, exit_code, error = _result_ok(payload)
     gate_passed = ok if tool in GATE_TOOLS else None
+    codes = payload.get("issue_codes") or []
+    if not isinstance(codes, list):
+        codes = []
     return StepResult(
         tool=tool,
         args=args,
@@ -669,6 +745,8 @@ def _call(
         error=error,
         summary=_summarize(tool, payload, skipped=False, skip_reason=None),
         elapsed_ms=int((time.monotonic() - started) * 1000),
+        actor=actor_for_tool(tool),
+        issue_codes=[str(code) for code in codes],
         result=payload,
     )
 
@@ -685,6 +763,142 @@ def _read_text(path: str | None) -> str:
 def _holdings_from_payload(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     raw = payload.get("holdings") or {}
     return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+
+
+def _resolve_permissions(ctx: AgentContext, intent_kind: str) -> Permissions:
+    if ctx.permissions is not None:
+        perms = Permissions(
+            role=ctx.role or ctx.permissions.role,
+            allow_send_digest=ctx.permissions.allow_send_digest,
+            allow_mutate_holdings=False,
+            skip_research=ctx.skip_research or ctx.permissions.skip_research,
+        )
+        return perms
+    return Permissions(
+        role=ctx.role or role_for_intent(intent_kind),
+        allow_send_digest=False,
+        allow_mutate_holdings=False,
+        skip_research=ctx.skip_research,
+    )
+
+
+def _note_handoff(
+    run: AgentRun,
+    *,
+    frm: str,
+    to: str,
+    reason: str,
+    stock_id: str | None = None,
+    issue_codes: list[str] | None = None,
+) -> Handoff:
+    event = Handoff(
+        frm=frm,
+        to=to,
+        reason=reason,
+        stock_id=stock_id,
+        issue_codes=list(issue_codes or []),
+    )
+    run.handoffs.append(event)
+    return event
+
+
+def _audit_step(
+    audit: AuditLog | None,
+    step: StepResult,
+    *,
+    handoff_from: str | None = None,
+    handoff_to: str | None = None,
+    issue_codes: list[str] | None = None,
+) -> None:
+    if audit is None:
+        return
+    audit.record_tool(
+        tool=step.tool,
+        args=step.args,
+        ok=step.ok,
+        elapsed_ms=step.elapsed_ms,
+        exit_code=step.exit_code,
+        skipped=step.skipped,
+        skip_reason=step.skip_reason,
+        summary=step.summary,
+        issue_codes=issue_codes if issue_codes is not None else step.issue_codes,
+        actor=step.actor or actor_for_tool(step.tool),
+        handoff_from=handoff_from,
+        handoff_to=handoff_to,
+        stock_id=str(step.args.get("stock_id") or "") or None,
+    )
+
+
+def _record_research_validation(
+    run: AgentRun,
+    audit: AuditLog | None,
+    outcome: StepResult,
+) -> str:
+    """Turn gate.log rounds into Validator audit lines. Returns the actor to hand off from."""
+    stock_id = str(outcome.args.get("stock_id") or "") or None
+    rounds = gate_rounds_from_payload(outcome.result)
+    if not rounds and outcome.issue_codes:
+        rounds = [
+            {
+                "round": 1,
+                "passed": outcome.ok,
+                "issue_codes": outcome.issue_codes,
+            }
+        ]
+    if not rounds:
+        return ROLE_RESEARCH
+    events = handoffs_from_gate_rounds(
+        rounds, research_actor=ROLE_RESEARCH, stock_id=stock_id
+    )
+    run.handoffs.extend(events)
+    if audit is not None:
+        for round_info in rounds:
+            elapsed = int(float(round_info.get("duration_sec") or 0) * 1000)
+            audit.record_validator_round(
+                stock_id=stock_id,
+                gate_round=round_info.get("round"),
+                issue_codes=list(round_info.get("issue_codes") or []),
+                passed=bool(round_info.get("passed")),
+                research_actor=ROLE_RESEARCH,
+                elapsed_ms=elapsed,
+            )
+    last = rounds[-1]
+    if last.get("passed"):
+        return ROLE_VALIDATOR
+    return ROLE_VALIDATOR
+
+
+def _mark_research_artifact(
+    artifacts: dict[str, dict[str, Any]],
+    report_ok: dict[str, bool],
+    facts_ready: dict[str, bool],
+    outcome: StepResult,
+    trade_date: str | None,
+) -> None:
+    stock_id = str(outcome.args.get("stock_id") or "")
+    if not stock_id:
+        return
+    report_ok[stock_id] = outcome.ok
+    facts_path = outcome.result.get("facts_path")
+    csv_path = outcome.result.get("csv_path")
+    on_disk = research_facts_exist(stock_id, outcome.result.get("trade_date") or trade_date)
+    if facts_path:
+        on_disk = on_disk or Path(str(facts_path)).is_file()
+    if csv_path:
+        on_disk = on_disk or Path(str(csv_path)).with_suffix(".facts.json").is_file()
+    facts_ready[stock_id] = bool(outcome.ok or on_disk)
+    artifacts.setdefault(stock_id, {})
+    artifacts[stock_id]["trade_date"] = outcome.result.get("trade_date") or trade_date
+    artifacts[stock_id]["passed"] = bool(outcome.ok)
+    if notify_may_include(report_passed=outcome.ok):
+        markdown = _read_text(outcome.result.get("md_path"))
+        if not markdown:
+            markdown = str(outcome.result.get("markdown") or "").strip()
+        if not markdown:
+            markdown = f"（{stock_id} 報告已通過 gate）"
+        artifacts[stock_id]["markdown"] = markdown
+    else:
+        artifacts[stock_id].pop("markdown", None)
 
 
 def run_agent(
@@ -718,6 +932,7 @@ def run_agent(
         holdings = _holdings_from_payload(probe.result) if probe.ok else {}
 
     classified = classify_intent(ctx.intent)
+    perms = _resolve_permissions(ctx, classified.kind)
     stock_universe = list(holdings)
     if classified.stocks:
         stock_universe = list(dict.fromkeys([*classified.stocks, *stock_universe]))
@@ -741,6 +956,7 @@ def run_agent(
             skip_pdf=ctx.skip_pdf,
             skip_tavily=ctx.skip_tavily,
             max_rounds=ctx.max_rounds,
+            permissions=perms,
         )
     else:
         if not plan.trade_date:
@@ -750,7 +966,19 @@ def run_agent(
             holdings,
             csv_missing=csv_missing,
             approve_send=ctx.approve_send,
+            permissions=perms,
         )
+
+    run_id = ctx.run_id or new_run_id()
+    audit: AuditLog | None = None
+    audit_path: Path | None = None
+    if ctx.audit_enabled:
+        audit_path = (
+            Path(ctx.audit_path) if ctx.audit_path else default_audit_path(run_id, trade_date)
+        )
+        audit = AuditLog(run_id, audit_path)
+        for probe in probes:
+            _audit_step(audit, probe)
 
     run = AgentRun(
         intent=ctx.intent,
@@ -762,6 +990,10 @@ def run_agent(
         digest_status=built.digest_status,
         budget_max=ctx.max_tool_calls,
         dry_run=ctx.dry_run,
+        run_id=run_id,
+        role=perms.role,
+        audit_path=str(audit_path) if audit_path else None,
+        permissions=perms,
     )
 
     if ctx.dry_run:
@@ -775,13 +1007,57 @@ def run_agent(
 
     artifacts: dict[str, dict[str, Any]] = {}
     report_ok: dict[str, bool] = {}
+    facts_ready: dict[str, bool] = {}
     fetched: set[str] = set()
     step_results: list[StepResult] = []
     fatal_budget = False
+    previous_actor = ROLE_ORCHESTRATOR
+
+    def _append(step_result: StepResult, *, handoff_from: str | None = None) -> StepResult:
+        step_results.append(step_result)
+        dest = step_result.actor or actor_for_tool(step_result.tool)
+        source = handoff_from
+        if (
+            source is None
+            and not step_result.skipped
+            and previous_actor
+            and dest
+            and previous_actor != dest
+        ):
+            source = previous_actor
+            _note_handoff(
+                run,
+                frm=source,
+                to=dest,
+                reason=step_result.reason or step_result.tool,
+                stock_id=str(step_result.args.get("stock_id") or "") or None,
+            )
+        _audit_step(
+            audit,
+            step_result,
+            handoff_from=source,
+            handoff_to=dest if source else None,
+        )
+        return step_result
 
     for step in built.steps:
+        allowed_role, role_reason = tool_allowed_for_role(step.tool, perms.role)
+        if not allowed_role:
+            skipped = _call(
+                runner,
+                budget,
+                step.tool,
+                step.args,
+                reason=step.reason,
+                skipped=True,
+                skip_reason=role_reason,
+            )
+            _append(skipped)
+            run.notes.append(role_reason)
+            continue
+
         if fatal_budget:
-            step_results.append(
+            _append(
                 _call(
                     runner,
                     budget,
@@ -796,52 +1072,44 @@ def run_agent(
 
         if step.tool == "run_position_gate":
             stock_id = str(step.args.get("stock_id") or "")
-            allowed, reason = allow_position(stock_id, holdings)
+            ready = facts_ready.get(stock_id, False) or research_facts_exist(
+                stock_id, trade_date
+            )
+            allowed, reason = allow_position_handoff(
+                stock_id,
+                holdings,
+                report_ok=report_ok.get(stock_id, False),
+                facts_ready=ready,
+                skip_research=perms.skip_research,
+            )
             if not allowed:
-                step_results.append(
-                    _call(
-                        runner,
-                        budget,
-                        step.tool,
-                        step.args,
-                        reason=step.reason,
-                        skipped=True,
-                        skip_reason=reason,
-                    )
+                skipped = _call(
+                    runner,
+                    budget,
+                    step.tool,
+                    step.args,
+                    reason=step.reason,
+                    skipped=True,
+                    skip_reason=reason,
                 )
+                _append(skipped)
                 run.notes.append(reason)
-                continue
-            if skip_position_after_failed_research(report_ok=report_ok.get(stock_id, False)):
-                skip_reason = f"{stock_id} report-gate 未通過，不跑 position"
-                step_results.append(
-                    _call(
-                        runner,
-                        budget,
-                        step.tool,
-                        step.args,
-                        reason=step.reason,
-                        skipped=True,
-                        skip_reason=skip_reason,
-                    )
-                )
-                run.notes.append(skip_reason)
                 continue
 
         if step.tool == "draft_digest":
             items = _digest_items(artifacts, trade_date)
             if not items:
-                skip_reason = "沒有可融合的報告，略過 draft_digest"
-                step_results.append(
-                    _call(
-                        runner,
-                        budget,
-                        step.tool,
-                        step.args,
-                        reason=step.reason,
-                        skipped=True,
-                        skip_reason=skip_reason,
-                    )
+                skip_reason = "沒有已通過 gate 的成品，Notify 略過 draft_digest"
+                skipped = _call(
+                    runner,
+                    budget,
+                    step.tool,
+                    step.args,
+                    reason=step.reason,
+                    skipped=True,
+                    skip_reason=skip_reason,
                 )
+                _append(skipped)
                 run.notes.append(skip_reason)
                 run.digest_status = DIGEST_SKIPPED
                 continue
@@ -852,19 +1120,20 @@ def run_agent(
             }
 
         if step.tool == "send_digest":
-            allowed, reason = allow_send_digest(approved=ctx.approve_send)
+            allowed, reason = allow_send_digest(
+                approved=ctx.approve_send, permissions=perms
+            )
             if not allowed:
-                step_results.append(
-                    _call(
-                        runner,
-                        budget,
-                        step.tool,
-                        {**step.args, "approved": False},
-                        reason=step.reason,
-                        skipped=True,
-                        skip_reason=reason,
-                    )
+                skipped = _call(
+                    runner,
+                    budget,
+                    step.tool,
+                    {**step.args, "approved": False},
+                    reason=step.reason,
+                    skipped=True,
+                    skip_reason=reason,
                 )
+                _append(skipped)
                 run.digest_status = DIGEST_PENDING
                 run.notes.append(reason)
                 continue
@@ -872,7 +1141,9 @@ def run_agent(
         outcome = _call(runner, budget, step.tool, step.args, reason=step.reason)
         if outcome.skip_reason and "budget" in (outcome.skip_reason or ""):
             fatal_budget = True
-        step_results.append(outcome)
+        _append(outcome)
+        if not outcome.skipped:
+            previous_actor = outcome.actor or actor_for_tool(outcome.tool)
 
         if outcome.tool == "fetch_chips" and outcome.ok:
             stocks = outcome.args.get("stocks") or []
@@ -880,18 +1151,16 @@ def run_agent(
             csv_missing.difference_update(fetched)
 
         if outcome.tool == "run_report_gate":
-            stock_id = str(outcome.args.get("stock_id") or "")
-            report_ok[stock_id] = outcome.ok
-            artifacts.setdefault(stock_id, {})
-            artifacts[stock_id]["markdown"] = _read_text(outcome.result.get("md_path")) or (
-                f"（{stock_id} 報告 gate={'通過' if outcome.ok else '未通過'}）"
-            )
-            artifacts[stock_id]["trade_date"] = outcome.result.get("trade_date") or trade_date
+            _mark_research_artifact(artifacts, report_ok, facts_ready, outcome, trade_date)
+            previous_actor = _record_research_validation(run, audit, outcome)
 
         if outcome.tool == "run_position_gate" and outcome.ok:
             stock_id = str(outcome.args.get("stock_id") or "")
             artifacts.setdefault(stock_id, {})
-            artifacts[stock_id]["position_markdown"] = _read_text(outcome.result.get("md_path"))
+            if artifacts.get(stock_id, {}).get("passed"):
+                artifacts[stock_id]["position_markdown"] = _read_text(
+                    outcome.result.get("md_path")
+                )
 
         if should_retry_after_csv_missing(outcome.tool, outcome.exit_code) and not outcome.skipped:
             stock_id = str(outcome.args.get("stock_id") or "")
@@ -906,10 +1175,11 @@ def run_agent(
                     fetch_args,
                     reason="執行時缺 CSV，插入 Data 後重試",
                 )
-                step_results.append(fetch_outcome)
+                _append(fetch_outcome, handoff_from=previous_actor)
                 if fetch_outcome.ok:
                     fetched.add(stock_id)
                     csv_missing.discard(stock_id)
+                    previous_actor = ROLE_DATA
                     outcome.superseded = True
                     retry = _call(
                         runner,
@@ -918,19 +1188,20 @@ def run_agent(
                         step.args,
                         reason=f"{step.reason}（CSV 補齊後重試）",
                     )
-                    step_results.append(retry)
+                    _append(retry, handoff_from=ROLE_DATA)
                     outcome = retry
+                    if not retry.skipped:
+                        previous_actor = retry.actor or actor_for_tool(retry.tool)
                     if retry.tool == "run_report_gate":
-                        report_ok[stock_id] = retry.ok
-                        artifacts.setdefault(stock_id, {})
-                        artifacts[stock_id]["markdown"] = _read_text(
-                            retry.result.get("md_path")
-                        ) or (f"（{stock_id} 報告 gate={'通過' if retry.ok else '未通過'}）")
+                        _mark_research_artifact(
+                            artifacts, report_ok, facts_ready, retry, trade_date
+                        )
+                        previous_actor = _record_research_validation(run, audit, retry)
 
         if outcome.tool == "draft_digest" and outcome.ok:
             run.digest_subject = outcome.result.get("subject")
             run.digest_status = DIGEST_PENDING
-            run.notes.append("digest 草稿已產出，send_digest 待核准（本 repo 不寄信）")
+            run.notes.append("digest 草稿已產出，send_digest 權限關閉（待核准，本 repo 不寄信）")
 
     run.steps = step_results
     run.budget_calls = budget.calls
@@ -943,6 +1214,8 @@ def _digest_items(
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for stock_id, payload in artifacts.items():
+        if not notify_may_include(report_passed=bool(payload.get("passed"))):
+            continue
         markdown = str(payload.get("markdown") or "").strip()
         if not markdown:
             continue
@@ -976,6 +1249,12 @@ def format_run(run: AgentRun) -> str:
         f"種類: {run.intent_kind}",
         f"交易日: {run.trade_date or '（未定）'}",
     ]
+    if run.run_id:
+        lines.append(f"run_id: {run.run_id}")
+    lines.append(f"角色: {run.role}")
+    send_flag = "on" if run.permissions.allow_send_digest else "off"
+    skip_flag = "on" if run.permissions.skip_research else "off"
+    lines.append(f"權限: send_digest={send_flag}  skip_research={skip_flag}")
     if run.dry_run:
         lines.append("模式: dry-run（只列 plan，不跑 fetch／gate／digest）")
     lines.append("")
@@ -985,7 +1264,8 @@ def format_run(run: AgentRun) -> str:
     for index, step in enumerate(run.plan.steps, start=1):
         args = _short_args(step.args)
         extra = f"  {args}" if args else ""
-        lines.append(f"  {index}. {step.tool}{extra}")
+        actor = f"[{step.actor}] " if step.actor else ""
+        lines.append(f"  {index}. {actor}{step.tool}{extra}")
         if step.reason:
             lines.append(f"      {step.reason}")
     if run.plan.notes:
@@ -995,6 +1275,14 @@ def format_run(run: AgentRun) -> str:
             lines.append(f"  - {note}")
     if run.digest_status == DIGEST_PENDING:
         lines.append("  - send_digest: blocked（待核准）")
+
+    if run.handoffs:
+        lines.append("")
+        lines.append("Handoffs:")
+        for index, event in enumerate(run.handoffs, start=1):
+            codes = f"  issue_codes={event.issue_codes}" if event.issue_codes else ""
+            stock = f"  {event.stock_id}" if event.stock_id else ""
+            lines.append(f"  {index}. {event.frm} → {event.to}{stock}  {event.reason}{codes}")
 
     if run.probes:
         lines.append("")
@@ -1018,6 +1306,8 @@ def format_run(run: AgentRun) -> str:
     )
     if run.digest_subject:
         lines.append(f"草稿主旨: {run.digest_subject}")
+    if run.audit_path:
+        lines.append(f"Audit: {run.audit_path}")
     return "\n".join(lines)
 
 
@@ -1043,7 +1333,8 @@ def _format_step_line(index: int, step: StepResult) -> str:
     else:
         flag = "FAIL"
     elapsed = f" {step.elapsed_ms}ms" if step.elapsed_ms else ""
-    return f"  {index}. {step.tool:<22} {flag}{elapsed}  {step.summary}"
+    actor = f"[{step.actor}] " if step.actor else ""
+    return f"  {index}. {actor}{step.tool:<22} {flag}{elapsed}  {step.summary}"
 
 
 def run_to_dict(run: AgentRun) -> dict[str, Any]:
@@ -1062,13 +1353,31 @@ def run_to_dict(run: AgentRun) -> dict[str, Any]:
         "budget_calls": run.budget_calls,
         "budget_max": run.budget_max,
         "dry_run": run.dry_run,
+        "run_id": run.run_id,
+        "role": run.role,
+        "audit_path": run.audit_path,
+        "permissions": {
+            "role": run.permissions.role,
+            "allow_send_digest": run.permissions.allow_send_digest,
+            "skip_research": run.permissions.skip_research,
+        },
+        "handoffs": [
+            {
+                "from": event.frm,
+                "to": event.to,
+                "reason": event.reason,
+                "stock_id": event.stock_id,
+                "issue_codes": event.issue_codes,
+            }
+            for event in run.handoffs
+        ],
     }
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python main.py agent",
-        description="意圖 → plan → 執行 Phase 0 tools。send_digest 預設不寄。",
+        description="意圖 → plan → 執行 Phase 0 tools。send_digest 預設不寄；寫 JSONL audit。",
     )
     parser.add_argument("intent", nargs="*", help="自然語言意圖，例如：幫我處理今天持股")
     parser.add_argument("--date", dest="trade_date", default=None, help="指定交易日 YYYY-MM-DD")
@@ -1085,6 +1394,29 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_GATE_ROUNDS)
     parser.add_argument("--skip-pdf", action="store_true", default=True)
     parser.add_argument("--tavily", action="store_true", help="允許 answer_market_chat 使用 Tavily")
+    parser.add_argument(
+        "--role",
+        default=None,
+        choices=sorted(KNOWN_ROLES),
+        help="覆蓋角色 allowlist（預設依意圖：路況=chat，其餘=orchestrator）",
+    )
+    parser.add_argument(
+        "--skip-research",
+        action="store_true",
+        help="Position 不要求本輪 Research facts（仍要有持倉）",
+    )
+    parser.add_argument("--run-id", dest="run_id", default=None, help="指定 audit run_id")
+    parser.add_argument(
+        "--audit-dir",
+        default=None,
+        help="audit JSONL 目錄；預設 reports/agent/{交易日}/",
+    )
+    parser.add_argument("--no-audit", action="store_true", help="不寫 audit JSONL")
+    parser.add_argument(
+        "--replay",
+        default=None,
+        help="重放既有 audit JSONL（不執行 tools）",
+    )
     return parser.parse_args(argv)
 
 
@@ -1102,6 +1434,19 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "--":
         argv = argv[1:]
     args = _parse_args(argv)
+    if args.replay:
+        try:
+            records = load_audit(args.replay)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"ERROR: 無法重放 audit：{exc}", file=sys.stderr)
+            return EXIT_BAD_ARGS
+        payload = replay_audit(records)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        else:
+            print(format_replay(payload))
+        return EXIT_OK
+
     intent = " ".join(args.intent).strip()
     if not intent and not args.plan_json:
         print(
@@ -1120,6 +1465,14 @@ def main(argv: list[str] | None = None) -> int:
         if not intent:
             intent = external_plan.intent
 
+    audit_path = None
+    if args.audit_dir:
+        run_id = args.run_id or new_run_id()
+        day = args.trade_date or "undated"
+        audit_path = Path(args.audit_dir) / day / f"run_{run_id}.jsonl"
+    else:
+        run_id = args.run_id
+
     ctx = AgentContext(
         intent=intent,
         trade_date=args.trade_date,
@@ -1130,6 +1483,11 @@ def main(argv: list[str] | None = None) -> int:
         max_tool_calls=max(1, args.max_calls),
         max_elapsed_sec=max(1.0, args.max_elapsed),
         dry_run=args.dry_run,
+        role=args.role,
+        skip_research=args.skip_research,
+        run_id=run_id,
+        audit_enabled=(not args.no_audit) and (bool(args.audit_dir) or not args.dry_run),
+        audit_path=audit_path,
     )
     run = run_agent(intent, ctx, plan=external_plan)
     if args.json:
