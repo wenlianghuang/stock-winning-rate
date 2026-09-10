@@ -1,12 +1,14 @@
-# Phase 3 — 多 Agent 交接與權限
+# Phase 3 — 角色 allowlist、交接標籤與權限
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。人若要逐步產報仍見 [`commands.md`](./commands.md)；一句話意圖見 [`Phase2.md`](./Phase2.md)。本文件記錄：為什麼要把 Phase 2 的內部步驟顯式化成交接、角色 allowlist 怎麼擋、JSONL audit 怎麼重放、以及關掉 `send_digest` 時流程如何停在草稿。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。人若要逐步產報仍見 [`commands.md`](./commands.md)；一句話意圖見 [`Phase2.md`](./Phase2.md)。本文件記錄：為什麼要把 Phase 2 的內部步驟標上 `actor`、角色 allowlist 怎麼擋、JSONL audit 怎麼重放、以及關掉 `send_digest` 時流程如何停在草稿。
+
+本階段**不是** Agent2Agent（A2A）協定。職缺的 A2A 與這裡的關係（協定層沒有、問題層只有薄概念親戚）見 [`a2a.md`](./a2a.md)。
 
 狀態：**已落地**（角色 allowlist + Research↔Validator 交接 + `reports/agent/` JSONL + `--replay`）。
 
 ---
 
-## 1. 概念：步驟變成可審計的交接，不是再包一層 Agent 框架
+## 1. 概念：步驟變成可審計的角色標籤，不是 A2A，也不是再包一層 Agent 框架
 
 Phase 2 的 Orchestrator 已經會選 tool、擋無持倉 position、擋寄信。對面試與事後追查來說，缺的是兩件事：
 
@@ -19,7 +21,7 @@ Phase 3 要解的是：
 
 不重寫 gate。`report-gate` 的 `max_rounds` loop 仍在 skill 裡跑。Orchestrator 在 `run_report_gate` 結束後讀 `.gate.log`（測試可塞 `gate_rounds`），把每一輪物質化成 Validator 紀錄與 `Research → Validator → Research` 交接。這是「現有 loop 的多角色版」，不是第二層 retry。
 
-LLM 仍然不能自己寄信、不能改持股、不能對無持倉跑部位。Phase 3 只是把這些規則標上 **actor** 與 **audit**。
+LLM 仍然不能自己寄信、不能改持股、不能對無持倉跑部位。Phase 3 只是把這些規則標上 **actor** 與 **audit**。不要把 `Handoff` 或 Data／Research／Notify 角色說成已做 Agent2Agent。
 
 ---
 
@@ -32,7 +34,7 @@ LLM 仍然不能自己寄信、不能改持股、不能對無持倉跑部位。P
 ┌───────────────────┐
 │ Orchestrator      │  意圖 → plan → policy（含角色 allowlist）
 └─────────┬─────────┘
-          │ 交接（不是六個 process）
+          │ actor 切換（同一 process，不是 A2A）
      ┌────┴─────────────────────────────┐
      ▼          ▼            ▼          ▼
    Data      Research     Position    Notify
@@ -43,12 +45,12 @@ LLM 仍然不能自己寄信、不能改持股、不能對無持倉跑部位。P
               └── Validator  ← .gate.log 的 issue_codes
 ```
 
-同一條「處理持股」run 的交接順序：
+同一條「處理持股」run 的角色順序（仍是一個 Orchestrator，不是六個 A2A server）：
 
 1. Orchestrator → Data（缺 CSV 才 fetch）
 2. Data → Research（`run_report_gate`）
 3. Research → Validator（每一輪 issue list）
-4. 未通過則 Validator → Research（交回同一 specialist；實際執行仍在 gate 內）
+4. 未通過則 Validator → Research（交回同一角色；實際執行仍在 gate 內）
 5. 通過且有均價／張數 → Validator／Research → Position（必須已有 Research facts，除非 `--skip-research`）
 6. 僅「已通過 gate」的成品 → Notify（`draft_digest`）
 7. Notify **不停** 去 `send_digest`：權限關閉 + human gate
@@ -238,7 +240,7 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 - `docs/agent-roadmap.md` — Phase 3 指向本文件
 - `docs/Phase0.md`、`docs/Phase1.md`、`docs/Phase2.md` — 下一階段連結
 
-沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。
+沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。沒有實作 Agent2Agent。
 
 ---
 
@@ -260,9 +262,9 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 
 ## 7. 現場 demo
 
-現場**不要**把本階段當獨立戲份。這裡不是六個 process，也不是第二層 retry：Validator 交接是事後讀 `.gate.log`，既有 gate loop 的多角色版。`--role chat` 拆空 plan、`--replay` JSONL 對懂 A2A 的人資訊密度低。
+現場**不要**把本階段當獨立戲份。這裡不是六個 process，不是 Agent2Agent，也不是第二層 retry：Validator 標籤是事後讀 `.gate.log`，既有 gate loop 的多角色版。`--role chat` 拆空 plan、`--replay` JSONL 對懂 A2A **協定**的人不能當 A2A 演示——沒有 Card、沒有跨 Agent HTTP。
 
-閉環用 Phase 1 產出來的 `.gate.log` 就能講。職缺提到權限／審計時口頭對應：角色 allowlist、`send_digest` 預設關、JSONL 可重放、不下單。程式與 `tests/test_phase3.py` 保留。
+閉環用 Phase 1 產出來的 `.gate.log` 就能講。職缺提到權限／審計時口頭對應：角色 allowlist、`send_digest` 預設關、JSONL 可重放、不下單。職缺提到 **A2A** 時不要用本階段充數。程式與 `tests/test_phase3.py` 保留。
 
 現場主線：MCP 2330 → facts／gate 產物 → 05:30 共用 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
@@ -272,4 +274,4 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 
 Phase 4 落地見 [`Phase4.md`](./Phase4.md)：台北 05:30 後產一份全站共用開盤前 brief；美股失敗重試、不略過；持股仍不進排程。
 
-面試可以講：一句話處理持股；audit 看得到第一輪 `issue_codes` 與 Validator 打回；chat 角色寄不出信；關掉 send 權限時只留草稿。數字仍由 harness 算、gate 擋住。現場不必重跑 holdings 或 replay。
+面試可以講：一句話處理持股；audit 看得到第一輪 `issue_codes` 與 Validator 打回；chat 角色寄不出信；關掉 send 權限時只留草稿。數字仍由 harness 算、gate 擋住。這是 in-process 權限與審計，不是 A2A。現場不必重跑 holdings 或 replay。

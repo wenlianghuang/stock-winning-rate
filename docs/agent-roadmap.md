@@ -1,10 +1,10 @@
 # Agent 精進路線
 
-把本專案從「人觸發的產報 pipeline」升級成「會自己呼叫工具、交接、受權限約束的台股作業 Agent」。
+把本專案從「人觸發的產報 pipeline」升級成「會自己呼叫工具、受權限約束的台股作業 Agent」。
 
 網站（`stock-report-site`）當導入層，STT（`AI_Speech/stt`）當語音 tool。本文件只規劃 `stock-winning-rate` 本體；相鄰 repo 的接點寫在最後一節。
 
-命令速查見 [`commands.md`](./commands.md)。
+命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。
 
 ---
 
@@ -21,7 +21,7 @@
 |------|------|
 | `main.py` / FastAPI 依序呼叫 script | Orchestrator 依意圖決定要跑哪些 tool |
 | skills 是 CLI 與 HTTP 工作流 | 同一組能力以 MCP tool 暴露 |
-| report / position / daily 各跑各的 | specialist agents 交接（A2A） |
+| report / position / daily 各跑各的 | 同一 process 裡用角色標籤編排（**不是** Agent2Agent 協定） |
 | 人按按鈕才跑 | 收盤後可排程；寄信／發布要核准 |
 | agy 呼叫帶 `--dangerously-skip-permissions` | 工具白名單、審計 log、人機臨界點 |
 
@@ -53,12 +53,14 @@
 
 ### 缺（本路線要補）
 
-- MCP tool 介面（依賴已宣告、程式沒有）
-- Orchestrator：自然語言／結構化意圖 → 選 tool、填參數、處理失敗
-- 多 Agent 交接，而不是一支 script 串完
+Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見各 Phase 文件）。Agent2Agent 協定不在這張清單裡，見 §5 與 [`a2a.md`](./a2a.md)。
+
+- MCP tool 介面（依賴已宣告、程式沒有）→ Phase 1
+- Orchestrator：自然語言／結構化意圖 → 選 tool、填參數、處理失敗 → Phase 2
+- 角色 allowlist 與可重放 audit，而不是一支 script 串完就看不出誰做了哪步 → Phase 3（in-process，不是 A2A）
 - 權限：誰能跑什麼、寄信／發布是否要人確認
 - 審計：每次 tool call 的輸入、輸出摘要、耗時、結果
-- 排程型「類 RPA」：台北 05:30 後產一份全站共用開盤前 brief（不夜跑每人持股）
+- 排程型「類 RPA」：台北 05:30 後產一份全站共用開盤前 brief（不夜跑每人持股）→ Phase 4
 
 ---
 
@@ -70,13 +72,13 @@
         ▼
 ┌───────────────────┐
 │ Orchestrator      │  意圖解析、tool 選擇、失敗重試、人機臨界點
-│ （本 repo 新層）   │
+│ （本 repo 新層）   │  單 process；不是 A2A 網路
 └─────────┬─────────┘
-          │ MCP
+          │ MCP（Agent → 工具；已落地）
     ┌─────┴──────────────────────────────┐
     ▼          ▼           ▼             ▼
  Data        Research    Position     Notify
- Agent       Agent       Agent        Agent
+ （角色）     （角色）     （角色）     （角色）
     │          │           │             │
     ▼          ▼           ▼             ▼
  fetch_chips  report-gate position-gate send_digest
@@ -84,12 +86,14 @@
               validate-*
 ```
 
-同一組 tool 三種入口共用：Orchestrator、現有 FastAPI、未來 Copilot Studio custom connector。  
+圖裡的 Data／Research／… 是 **邏輯角色**，跑在同一個 Orchestrator process。它們沒有各自的 Agent Card，也沒有用 Agent2Agent 協定互叫。職缺的 A2A 會是「Studio 或其他 Agent ↔ 本系統」的另一條線，本路線沒做。見 [`a2a.md`](./a2a.md)。
+
+同一組 tool 三種入口共用：Orchestrator、現有 FastAPI、MCP。Copilot Studio **custom connector** 若接，接的是 HTTP／MCP 工具層，**不是** Studio 的「Add A2A agent」。  
 **不要**為 Microsoft 棧重做整套台股邏輯。
 
-角色對應現有程式（先當邏輯邊界，不一定要六個 process）：
+角色對應現有程式（先當邏輯邊界，**不是** 六個 A2A server）：
 
-| Agent | 現有模組 | 職責 |
+| 角色 | 現有模組 | 職責 |
 |-------|----------|------|
 | Data | `tw-stock-report`、`chip_signals`、`market_day_signals` | 抓資料、算 facts；不寫敘事 |
 | Research | `report-gate`、`market-daily`、`market-weekly`、`us-tech-news` | 產報 + 格式／事實／推理 gate |
@@ -162,7 +166,7 @@ Orchestrator 規則（寫成可測的 policy，不要全交給模型）：
 
 1. 缺資料先 Data，再 Research。
 2. 無持倉不跑 Position。
-3. gate 失敗則把 `issue_codes` 交回同一 specialist，直到通過或達 `max_rounds`。
+3. gate 失敗則把 `issue_codes` 交回同一角色（仍在既有 gate loop 內），直到通過或達 `max_rounds`。
 4. `send_digest` 預設 blocked，只產生草稿與「待核准」狀態。
 5. 單次 run 有 tool budget（次數／時間），避免無限互叫。
 
@@ -175,11 +179,11 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 - 印出 plan、每步 tool、gate 通過與否。
 - 至少 3 個 golden 意圖有 fixture 測試（有持倉／無持倉／只問路況）。
 
-### Phase 3 — 多 Agent 交接與權限
+### Phase 3 — 角色 allowlist、交接標籤與權限
 
-落地說明（角色 allowlist、Research↔Validator 交接、JSONL audit／replay）見 [`Phase3.md`](./Phase3.md)。
+落地說明（角色 allowlist、Research↔Validator 標籤、JSONL audit／replay）見 [`Phase3.md`](./Phase3.md)。與 Agent2Agent 的對照見 [`a2a.md`](./a2a.md)。
 
-把 Phase 2 的內部步驟顯式化成交接，方便講 A2A，也方便審計。
+把 Phase 2 的內部步驟標上 `actor`，方便審計與權限，**不是**為了實作或冒充 A2A。
 
 - Research 失敗 → Validator 產出 issue list → Research 再跑（現有 loop 的多角色版）。
 - Position 開始前必須有 Research 的 facts（或明確 `skip_research`）。
@@ -217,6 +221,7 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 - 不把 STT、Next.js、Supabase 搬進本 repo。
 - 不接券商下單、不自動改持股。
 - 不用 Copilot Studio 重寫籌碼／gate。
+- **不實作 Agent2Agent（A2A）協定**（無 Agent Card、無 A2A HTTP、無跨 runtime 委派）。Phase 2／3 也不得改稱 A2A 經驗。若以後要給 Studio 當 A2A client 呼叫，另開階段把現有 Agent 包成 A2A server，仍進 `agent.tools`。見 [`a2a.md`](./a2a.md)。
 - 不把 MCP、Orchestrator、排程在同一個 PR 一次做完。
 
 ---
@@ -248,13 +253,13 @@ agent/
 | `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 開盤前日報讀全站共用 brief（Phase 4）。寄信仍可之後吃 pending digest。 |
 | `AI_Speech/stt` | `transcribe_voice` tool | 本 repo 最多加一個可選 MCP tool 轉打 STT HTTP；不在本 repo 擴 whisper。 |
 
-面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。
+面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。MCP 有實作；A2A 協定沒有。Phase 2／3 是編排與權限。
 
 ---
 
 ## 8. 演示：路線完成 vs 現場腳本
 
-整條路線結束時，§8.1 都要**能指著程式或測試講**。現場 10–15 分鐘**不要**依序演完每一 Phase。Phase 2／3 對職缺關鍵字有用，對「讓人看見系統在做事」幾乎沒有增量；當口頭對應，不要當第二、第三個 live 流程。
+整條路線結束時，§8.1 都要**能指著程式或測試講**。現場 10–15 分鐘**不要**依序演完每一 Phase。Phase 2／3 對職缺的 **orchestrator／權限／審計** 有用，對 **A2A 關鍵字沒有**（見 [`a2a.md`](./a2a.md)）；對「讓人看見系統在做事」幾乎沒有增量。當口頭對應，不要當第二、第三個 live 流程。
 
 ### 8.1 路線完成定義（工程上要有，不必現場全跑）
 
@@ -279,9 +284,13 @@ Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要
 為什麼 Phase 2／3 不當 live 主線：
 
 - Phase 1 的 Cursor client **已經**在用自然語言選 tool；預設 planner 是規則分類（關鍵字 + 四碼代號），dry-run 看起來像固定工作流表，現場比 MCP 弱。
-- Phase 3 不是六個 process。Validator 交接是事後讀 `.gate.log`，既有 gate loop 的多角色版。懂 A2A 的人會看穿。
+- Phase 3 不是六個 process，更不是 Agent2Agent。Validator「交接」是事後讀 `.gate.log`，既有 gate loop 的多角色標籤。若講成 A2A，懂協定的人會問 Agent Card，專案對不上。
 
-職缺若寫 orchestrator／權限／審計：口頭對應即可——Phase 2 = 意圖進可測 plan，模型不能靠 JSON 偷寄信；Phase 3 = 每次 tool 有 actor + JSONL，可重放、不下單。
+職缺關鍵字怎麼對：
+
+- **MCP**：現場主線第一段（真的有）。
+- **orchestrator／權限／審計**：口頭對應 Phase 2／3——意圖進可測 plan；模型不能靠 JSON 偷寄信；每次 tool 有 actor + JSONL；不下單。
+- **A2A（Agent2Agent）**：承認沒做協定；不要用 Phase 2／3 充當。
 
 ---
 
@@ -290,5 +299,5 @@ Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要
 1. Phase 0：抽出 `fetch_chips` + `run_report_gate` + `get_last_trading_date`（最小可演示的 tool 層）。
 2. Phase 1：MCP 只先 expose 這三個，跑通一檔 2330。
 3. 再把 position、daily、digest draft 收進 tool 層，進入 Phase 2 的「處理持股」意圖。
-4. Phase 3 權限／審計與 Phase 2 可重疊，但 allowlist 測試要先有。
+4. Phase 3 權限／審計與 Phase 2 可重疊，但 allowlist 測試要先有。不要在這一階段做 A2A server。
 5. Phase 4：05:30 共用盤前 brief（不要做成每人持股 cron）。

@@ -1,6 +1,6 @@
 # Phase 1 — MCP server
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。日常 CLI 仍見 [`commands.md`](./commands.md)；網站仍走 FastAPI。本文件記錄：為什麼要 MCP、實際 expose 了哪些 tools、以及怎麼驗證「一檔沒有持股的深度報告」。Cursor 掛 server、Inspector 表單、現場 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。日常 CLI 仍見 [`commands.md`](./commands.md)；網站仍走 FastAPI。本文件記錄：為什麼要 MCP、實際 expose 了哪些 tools、以及怎麼驗證「一檔沒有持股的深度報告」。Cursor 掛 server、Inspector 表單、現場 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。MCP 與職缺的 A2A（Agent2Agent 協定）不是同一層，見 [`a2a.md`](./a2a.md)。
 
 狀態：**已落地**（`python main.py mcp` + in-memory client 測試）。
 
@@ -10,7 +10,7 @@
 
 Phase 0 把可呼叫能力收成 `agent.tools`。Phase 1 不改業務、不重寫 gate，只加一層協定：
 
-> MCP server 包 Phase 0 的 typed tools。Cursor／Claude／inspector 用 JSON-RPC 呼叫；人與網站的路徑不變。
+> MCP server 包 Phase 0 的 typed tools。Cursor／Claude／inspector 用 JSON-RPC 呼叫；人與網站的路徑不變。這是 **Agent → 工具**，不是 **Agent → Agent**（A2A）。
 
 若 MCP 再 `subprocess` 去跑 `main.py stock-report`，會把 Phase 0 收掉的 argv／cwd／stderr 問題加回來。所以 server 只做：
 
@@ -42,7 +42,7 @@ python main.py mcp
                   └─ draft_digest / send_digest（核准點）
 ```
 
-`api/stock_api.py` **沒有刪**。網站 job 繼續 HTTP；MCP 是給 Agent 的介面。
+`api/stock_api.py` **沒有刪**。網站 job 繼續 HTTP；MCP 是給 Agent 的工具介面。本階段沒有 A2A server。
 
 Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。Phase 3 已落地：`audit.py`、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。Phase 4 已落地：`llm.py`、`python main.py schedule`（見 [`Phase4.md`](./Phase4.md)）。
 
@@ -299,7 +299,7 @@ Connect → List Tools，之後呼叫順序與 §5.1 相同。這句「連 URL�
 
 ## 8. 現場 demo
 
-這是現場主線的第一段：Cursor Agent 對 2330 `fetch_chips` → `run_report_gate`。步驟與 prompt 見 [`mcp-cursor.md`](./mcp-cursor.md)。接著指 facts／gate 產物，再接到 Phase 4 共用盤前 brief。Phase 2／3 不當 live 主線，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
+這是現場主線的第一段：Cursor Agent 對 2330 `fetch_chips` → `run_report_gate`。步驟與 prompt 見 [`mcp-cursor.md`](./mcp-cursor.md)。接著指 facts／gate 產物，再接到 Phase 4 共用盤前 brief。Phase 2／3 不當 live 主線，也不是 A2A 演示，見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。
 
 ---
 

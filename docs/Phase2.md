@@ -1,6 +1,6 @@
 # Phase 2 — Orchestrator（自主決策）
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。人若要逐步產報仍見 [`commands.md`](./commands.md)；本文件記錄：為什麼要 Orchestrator、意圖怎麼變成 plan、policy 擋什麼、以及怎麼跑三個 golden 意圖。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。人若要逐步產報仍見 [`commands.md`](./commands.md)；本文件記錄：為什麼要 Orchestrator、意圖怎麼變成 plan、policy 擋什麼、以及怎麼跑三個 golden 意圖。本階段**不是** Agent2Agent（A2A）協定，見 [`a2a.md`](./a2a.md)。
 
 狀態：**已落地**（`python main.py agent` + fixture 測試）。
 
@@ -17,6 +17,8 @@ Phase 2 要解的是：使用者不再下 `/gate 2409` 或 `/position 2409 32.5 
 LLM 在這一層 **只允許** 填 plan JSON（可選 `--plan-json`）。預設 planner 是規則，不呼叫 agy／Ollama——golden 測試與 `--dry-run` 不需要模型。Phase 4 的 `llm.py` adapter 再接可替換 backend；現在不要把編排綁死 agy。
 
 不重寫 gate。`max_rounds` 仍交給既有 `report-gate`／`position-gate`；Orchestrator 只在 CSV 缺失（exit 20）時插入一次 `fetch_chips` 再重試。
+
+本階段也**不是** A2A：沒有第二個 Agent、沒有 Agent Card、沒有跨 process 委派。預設還是規則分類 + 同一組 tools。見 [`a2a.md`](./a2a.md)。
 
 ---
 
@@ -57,7 +59,7 @@ Roadmap 五條不要交給模型：
 |---|------|------|
 | 1 | 缺資料先 Data，再 Research | plan 階段插入 `fetch_chips`；執行時若 gate 回 exit 20，再 fetch 一次後重試 |
 | 2 | 無持倉不跑 Position | `allow_position`：要有均價且股數 > 0 |
-| 3 | gate 失敗交回同一 specialist | 不重開第二層 loop；把 `max_rounds` 傳進既有 gate。CSV 缺失才由 Orchestrator 補 Data |
+| 3 | gate 失敗交回同一角色（仍在既有 gate 內） | 不重開第二層 loop；把 `max_rounds` 傳進既有 gate。CSV 缺失才由 Orchestrator 補 Data |
 | 4 | `send_digest` 預設 blocked | plan **不含** send；草稿狀態 `pending_approval`。LLM plan 裡的 `approved=true` 也不算數 |
 | 5 | tool budget | 預設 32 次／1800 秒；用盡則後面步驟 SKIP |
 
@@ -212,7 +214,7 @@ Notes:
 
 現場**不要**把本階段當獨立戲份。規則 planner 的 `--dry-run` 看起來像固定工作流表；真跑 `process_holdings` 又慢（agy 多輪）。Cursor 當 MCP client（Phase 1）時，模型選 tool 已經比這層規則分類強。
 
-本階段留給職缺提到 orchestrator 時口頭講五條 policy；必要時 `--dry-run` 十秒。程式與 golden tests 保留，不是刪掉。
+本階段留給職缺提到 orchestrator／自主決策時口頭講五條 policy；必要時 `--dry-run` 十秒。程式與 golden tests 保留，不是刪掉。職缺若問 **A2A**，不要用本階段回答——那是 Agent2Agent 協定，這裡沒做。見 [`a2a.md`](./a2a.md)。
 
 現場主線：MCP 2330 → facts／gate 產物 → 05:30 共用 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
@@ -222,4 +224,4 @@ Notes:
 
 Phase 3 落地見 [`Phase3.md`](./Phase3.md)。Phase 4 落地見 [`Phase4.md`](./Phase4.md)：05:30 共用盤前 brief，不是每人持股 cron。
 
-面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。現場不必真跑這一條。
+面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。這是單 process 編排，不是兩個 Agent 用 A2A 互叫。現場不必真跑這一條。

@@ -1,6 +1,6 @@
 # Phase 4 — 類 RPA：05:30 共用開盤前 brief + 可替換 LLM
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。本文件記錄為什麼排程只跑大盤、美股失敗為什麼不略過、網站如何讀同一份產物。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。本文件記錄為什麼排程只跑大盤、美股失敗為什麼不略過、網站如何讀同一份產物。本階段是 cron 型類 RPA，**不是** Agent2Agent 協定，見 [`a2a.md`](./a2a.md)。
 
 狀態：**已落地**（`python main.py schedule --once` + `GET /market-daily/current` + `agent/llm.py`）。
 
@@ -19,7 +19,7 @@ Phase 4 只補兩件事：
 1. **類 RPA：** 05:30 後自己跑 `run_market_daily` 一次；已有含美股的 brief 就 skip。
 2. **LLM adapter：** `agy` / Ollama 走 `agent/llm.py`；敘事可換，gate 與 facts 不換。
 
-不做：每人持股 fan-out、自動寄信、自動下單、用 `--skip-us` 當失敗後備。
+不做：每人持股 fan-out、自動寄信、自動下單、用 `--skip-us` 當失敗後備。排程也不是 A2A：沒有第二個 Agent runtime 用協定來觸發 brief。
 
 ---
 
@@ -124,4 +124,4 @@ API：`GET /market-daily/current` 回傳日窗 + 是否 ready；`GET /market-dai
 
 面試可以講：05:30 機器人產一份共用開盤 brief；美股掛了就重試，不會假裝沒有外盤；使用者進站看到同一份，部位分析仍跟人走。
 
-現場這是主線第三段（MCP 2330 → gate 產物 → 本階段 brief）。不要先花時間跑 Phase 2／3 的 agent CLI。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
+現場這是主線第三段（MCP 2330 → gate 產物 → 本階段 brief）。不要先花時間跑 Phase 2／3 的 agent CLI，也不要把盤前排程講成 A2A。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。

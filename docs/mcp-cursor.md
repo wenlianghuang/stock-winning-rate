@@ -10,7 +10,7 @@
 
 使用者在 `stock-report-site` 點產報，走的是 Next.js → `lib/agent-client.ts` → FastAPI `:8765` → `agent.tools`。**不經 MCP。**
 
-MCP 是同一組 `agent.tools` 的第三扇門：給 Cursor／Claude／Inspector／未來 Copilot connector。Inspector 那頁是除錯／演示 client，不是產品 UI。
+MCP 是同一組 `agent.tools` 的第三扇門：給 Cursor／Claude／Inspector，以及未來若接 Copilot 的 **custom connector／MCP**（工具層）。那 **不是** Copilot Studio 的「Add A2A agent」（Agent2Agent 協定）。Inspector 那頁是除錯／演示 client，不是產品 UI。對照見 [`a2a.md`](./a2a.md)。
 
 | 入口 | 誰啟動 server | 誰在用 |
 |------|----------------|--------|
@@ -146,4 +146,4 @@ Settings MCP 綠燈 → 貼 §2.3 prompt → 核准兩個 tool → 指著 chat �
 
 這是現場主線第一段，不是暖身。接著指 gate 產物，再接到當天共用盤前 brief（Phase 4）。**不要**接著跑 `python main.py agent` 處理持股、`--replay` 或 `--role chat`——那些是路線完成條件，不當 live 戲份。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
-收句：同一組 tools，網站走 HTTP，Cursor 走 MCP。
+收句：同一組 tools，網站走 HTTP，Cursor 走 MCP。職缺的 A2A 本 repo 沒做，不要在這段演示結尾說「這就是 A2A」。見 [`a2a.md`](./a2a.md)。

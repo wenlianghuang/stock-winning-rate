@@ -21,7 +21,7 @@ Phase 0 要解的問題不是「更好看的報告」，而是 **同一件事有
 
 完成後人還是照 `commands.md` 跑 `stock-report` → `report-gate` → `position-gate`。差別在內部：網站 job 不再為同一件事維護第二套 CLI 參數。
 
-意圖解析、MCP、多 Agent 交接、排程都是後面的 Phase，**不要**在這一層做。
+意圖解析、MCP、角色標籤／權限（Phase 3，**不是** Agent2Agent）、排程都是後面的 Phase，**不要**在這一層做。MCP 與 A2A 差在哪見 [`a2a.md`](./a2a.md)。
 
 ---
 
