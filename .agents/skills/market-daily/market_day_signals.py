@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+US_FETCH_ATTEMPTS = 3
+US_FETCH_BACKOFF_SEC = 15.0
 
 from day_window import DayWindow, resolve_day_window
 
@@ -557,10 +562,61 @@ def build_anchors(facts: MarketDayFacts) -> list[str]:
     return anchors
 
 
+def us_block_usable(block: dict[str, Any] | None) -> bool:
+    if not isinstance(block, dict) or not block.get("available"):
+        return False
+    indices = block.get("indices") if isinstance(block.get("indices"), dict) else {}
+    for key in ("IXIC", "SOX"):
+        item = indices.get(key)
+        if isinstance(item, dict) and item.get("day_return_pct") is not None:
+            return True
+    return False
+
+
+def fetch_us_day_block_with_retry(
+    us_as_of: str,
+    *,
+    attempts: int = US_FETCH_ATTEMPTS,
+    backoff_sec: float = US_FETCH_BACKOFF_SEC,
+    sleep: Callable[[float], None] | None = None,
+    fetch: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Fetch IXIC/SOX. Never silently skip; retry then raise."""
+    sleeper = sleep or time.sleep
+    tries = max(1, int(attempts))
+    last_error: BaseException | None = None
+    for i in range(tries):
+        try:
+            if fetch is not None:
+                block = fetch(us_as_of)
+            else:
+                ensure_import_paths()
+                from us_indices import build_us_day_block
+
+                block = build_us_day_block(us_as_of)
+            if us_block_usable(block):
+                return block
+            last_error = RuntimeError("美股指數資料不完整（那指／費半不可用）")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+        if i < tries - 1:
+            print(
+                f"WARN: US fetch retry {i + 1}/{tries}：{last_error}",
+                file=sys.stderr,
+            )
+            sleeper(max(0.0, float(backoff_sec)))
+    raise RuntimeError(f"美股指數抓取失敗（已重試 {tries} 次，不略過）：{last_error}") from last_error
+
+
 def build_market_day_facts(
     window: DayWindow,
     *,
     skip_us: bool = False,
+    require_us: bool = False,
+    us_attempts: int = US_FETCH_ATTEMPTS,
+    us_backoff_sec: float = US_FETCH_BACKOFF_SEC,
+    us_sleep: Callable[[float], None] | None = None,
+    us_fetch: Callable[[str], dict[str, Any]] | None = None,
     finmind_token: str | None = None,
 ) -> MarketDayFacts:
     ensure_import_paths()
@@ -605,10 +661,16 @@ def build_market_day_facts(
         )
     else:
         try:
-            from us_indices import build_us_day_block
-
-            us_block = build_us_day_block(window.us_as_of)
+            us_block = fetch_us_day_block_with_retry(
+                window.us_as_of,
+                attempts=us_attempts,
+                backoff_sec=us_backoff_sec,
+                sleep=us_sleep,
+                fetch=us_fetch,
+            )
         except Exception as exc:  # noqa: BLE001
+            if require_us:
+                raise
             print(f"WARN: US index day fetch failed: {exc}", file=sys.stderr)
             us_block = empty_us_block(
                 reason=f"fetch_error:{exc}",

@@ -45,7 +45,7 @@ Phase 0 要解的問題不是「更好看的報告」，而是 **同一件事有
 
 skills 不 import `agent`（避免循環）。`agent.tools` 包現有模組；skill CLI 的 `main()` 也改呼叫抽出來的核心（例如 `run_fetch`），這樣「單一實作」成立。
 
-尚未建立（留給 Phase 4）：`llm.py` adapter、收盤後排程。Phase 2 見 [`Phase2.md`](./Phase2.md)；Phase 3 見 [`Phase3.md`](./Phase3.md)（`audit.py` 已落地）。
+Phase 2 見 [`Phase2.md`](./Phase2.md)；Phase 3 見 [`Phase3.md`](./Phase3.md)；Phase 4 見 [`Phase4.md`](./Phase4.md)（`llm.py` + 05:30 共用盤前排程）。
 
 ---
 
@@ -199,5 +199,7 @@ uv run --extra ui --extra stock python main.py report-gate -- 2409 --skip-pdf
 ## 8. 下一階段
 
 Phase 1 落地見 [`Phase1.md`](./Phase1.md)：`python main.py mcp` expose 本層 tools。建議用 inspector 或測試裡的最小 client 跑通 `fetch_chips(2330)` → `run_report_gate(2330)`。FastAPI 保留給網站。
+
+本階段本身不是現場戲份；現場用 Phase 1 跑出來的 `.facts.json`／`.gate.log` 講 harness。整條現場主線見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
 「我先做了券商研究作業裡最難的一塊：數字由程式算、模型只寫敘事、不合格就打回。後來發現這還只是人觸發的 pipeline，所以把同一組能力收成 tool，再加上編排與核准——因為職缺要的是會自己跑流程、但不能自己寄信／下單的 Agent。」

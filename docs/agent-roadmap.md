@@ -58,7 +58,7 @@
 - 多 Agent 交接，而不是一支 script 串完
 - 權限：誰能跑什麼、寄信／發布是否要人確認
 - 審計：每次 tool call 的輸入、輸出摘要、耗時、結果
-- 排程型「類 RPA」：收盤後自動跑 daily → 持股報告 → digest（核准後才寄）
+- 排程型「類 RPA」：台北 05:30 後產一份全站共用開盤前 brief（不夜跑每人持股）
 
 ---
 
@@ -102,7 +102,7 @@
 
 ## 4. 分階段
 
-每階段都要能獨立演示。做完再進下一階段，不要平行開很多空殼。
+每階段都要能獨立驗證（測試／CLI），做完再進下一階段，不要平行開很多空殼。現場時間不均分：Phase 2／3 不必當獨立 live 戲份，見 §8。
 
 ### Phase 0 — 收斂介面（先做、範圍小）
 
@@ -196,14 +196,18 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 
 完成定義：一次「處理持股」run 可重放 audit log；關掉 `send_digest` 權限時，流程在草稿停住且測試覆蓋此路徑。
 
-### Phase 4 — 類 RPA 排程與可替換 LLM
+### Phase 4 — 類 RPA：05:30 共用開盤前 brief 與可替換 LLM
 
-- 排程：交易日 21:30 後（籌碼較完整）跑 Data → Daily → 持股 Research／Position → digest 草稿。
-- 核准：CLI flag 或之後由網站按「寄出」（網站改動不在本 repo 必做範圍，但 API 要能回傳草稿與 pending 狀態）。
-- LLM backend 介面：`agy` 與現有 Ollama chat 都走同一 adapter；Orchestrator 不綁死 agy。
-- **可選、薄適配：** 同一 MCP tools 給 Copilot Studio custom connector。不要用 Power Platform 重做 gate。
+落地說明見 [`Phase4.md`](./Phase4.md)。
 
-完成定義：不用人盯著 `main.py` 逐步下指令，也能產出當日草稿；寄信仍要一次核准。
+- **主路徑（共用）：** 台北 05:30（美股 overnight settle）跑 `run_market_daily` → `reports/market/{trade_date}/`。所有使用者看同一份。
+- **不做：** 夜跑每人持股／position／digest。均價與持股方法跟人走，仍由使用者觸發。
+- **美股失敗不略過：** Yahoo 重試後仍失敗則整次 run 失敗，不得默默 `--skip-us`。
+- **幂等：** 該 `trade_date` 已有通過且含美股的 brief 則 skip；`--force` 才重跑。
+- LLM backend：`agent/llm.py`（`agy` / Ollama）；Orchestrator 與 tools 不綁死 agy。
+- 網站讀 canonical brief，不再按 `user_id` 複製一份敘事。
+
+完成定義：不用人按「產生日報」，05:30 後每位登入者看到同一份 `for_session` brief；持股報告仍手動。
 
 ---
 
@@ -229,6 +233,7 @@ agent/
   policy.py       # 有持倉才 position、send 需核准、tool budget
   audit.py        # Phase 3 JSONL
   llm.py          # Phase 4 adapter
+  schedule.py     # Phase 4：05:30 共用盤前 brief
 ```
 
 `main.py` 加子命令：`mcp`、`agent`。  
@@ -240,23 +245,43 @@ agent/
 
 | Repo | 角色 | 本路線對它的要求 |
 |------|------|------------------|
-| `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 之後可改為「對 Orchestrator 下意圖」；寄信改吃 pending digest。非 Phase 0–1 阻擋項。 |
+| `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 開盤前日報讀全站共用 brief（Phase 4）。寄信仍可之後吃 pending digest。 |
 | `AI_Speech/stt` | `transcribe_voice` tool | 本 repo 最多加一個可選 MCP tool 轉打 STT HTTP；不在本 repo 擴 whisper。 |
 
 面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。
 
 ---
 
-## 8. 演示完成定義（整條路線結束時）
+## 8. 演示：路線完成 vs 現場腳本
 
-能現場跑（或錄影）這一條，且能指著程式講 MCP／權限／閉環：
+整條路線結束時，§8.1 都要**能指著程式或測試講**。現場 10–15 分鐘**不要**依序演完每一 Phase。Phase 2／3 對職缺關鍵字有用，對「讓人看見系統在做事」幾乎沒有增量；當口頭對應，不要當第二、第三個 live 流程。
 
-1. 一句話：「幫我處理今天持股。」
-2. Orchestrator 列出 plan（fetch / report / position / digest draft）。
-3. 某檔 report-gate 若第一輪失敗，audit 看得到 `issue_codes` 與下一輪通過。
-4. 無持倉的股票沒有 position 產物，且 plan 有說明。
-5. 信沒寄出，只有草稿 + 待核准。
-6. 同一組 tools 可用 MCP inspector 單獨點名呼叫。
+### 8.1 路線完成定義（工程上要有，不必現場全跑）
+
+1. 一句話意圖能編成 plan：`python main.py agent -- "幫我處理今天持股。"`（`--dry-run` 即可證明）
+2. Plan 含 fetch / report / position / digest draft；無持倉不跑 position，notes 有說明。
+3. report-gate 第一輪失敗時，audit／`.gate.log` 看得到 `issue_codes` 與下一輪通過。
+4. `send_digest` 預設 blocked，只有草稿 + 待核准。
+5. 同一組 tools 可用 MCP inspector 或 Cursor Agent 單獨點名呼叫（Cursor 實測見 [`mcp-cursor.md`](./mcp-cursor.md)）。
+
+Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要為了演示刪 `orchestrator.py`／`audit.py`——政策（無持倉不部位、寄信要核准、budget）仍是這條線跟「包一層 LLM 呼叫 script」的差別。
+
+### 8.2 現場主線（建議）
+
+資訊密度高、失敗面可控的三段：
+
+1. **Phase 1 MCP（2330）** — Cursor Agent：`fetch_chips` → `run_report_gate`。無持股不跑 position、不寄信。步驟見 [`mcp-cursor.md`](./mcp-cursor.md)。
+2. **Harness + gate** — 打開剛寫的 `.facts.json` 與（若有）曾被打回的 `.gate.log`。數字程式算、模型只寫敘事、不合格打回。閉環在 `report-gate` 裡就發生，不必靠 Phase 3 的角色標籤。
+3. **Phase 4 盤前** — 今天 05:30 已有的共用 brief（或 `schedule --once --dry-run` 說明幂等／美股失敗不略過）。沒人按按鈕也會跑；持股仍手動。
+
+跳過（現場）：真跑 `python main.py agent` 處理持股（agy 多輪、慢、易卡）、`--replay` 當主線、`--role chat` 把 plan 拆空。必要時 `--dry-run` 十秒帶過 policy。
+
+為什麼 Phase 2／3 不當 live 主線：
+
+- Phase 1 的 Cursor client **已經**在用自然語言選 tool；預設 planner 是規則分類（關鍵字 + 四碼代號），dry-run 看起來像固定工作流表，現場比 MCP 弱。
+- Phase 3 不是六個 process。Validator 交接是事後讀 `.gate.log`，既有 gate loop 的多角色版。懂 A2A 的人會看穿。
+
+職缺若寫 orchestrator／權限／審計：口頭對應即可——Phase 2 = 意圖進可測 plan，模型不能靠 JSON 偷寄信；Phase 3 = 每次 tool 有 actor + JSONL，可重放、不下單。
 
 ---
 
@@ -266,4 +291,4 @@ agent/
 2. Phase 1：MCP 只先 expose 這三個，跑通一檔 2330。
 3. 再把 position、daily、digest draft 收進 tool 層，進入 Phase 2 的「處理持股」意圖。
 4. Phase 3 權限／審計與 Phase 2 可重疊，但 allowlist 測試要先有。
-5. Phase 4 排程最後做；沒有它仍可面試，有它才像內部流程機器人。
+5. Phase 4：05:30 共用盤前 brief（不要做成每人持股 cron）。

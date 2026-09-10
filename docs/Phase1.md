@@ -1,6 +1,6 @@
 # Phase 1 — MCP server
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。日常 CLI 仍見 [`commands.md`](./commands.md)；網站仍走 FastAPI。本文件記錄：為什麼要 MCP、實際 expose 了哪些 tools、以及怎麼驗證「一檔沒有持股的深度報告」。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。日常 CLI 仍見 [`commands.md`](./commands.md)；網站仍走 FastAPI。本文件記錄：為什麼要 MCP、實際 expose 了哪些 tools、以及怎麼驗證「一檔沒有持股的深度報告」。Cursor 掛 server、Inspector 表單、現場 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。
 
 狀態：**已落地**（`python main.py mcp` + in-memory client 測試）。
 
@@ -44,7 +44,7 @@ python main.py mcp
 
 `api/stock_api.py` **沒有刪**。網站 job 繼續 HTTP；MCP 是給 Agent 的介面。
 
-Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。Phase 3 已落地：`audit.py`、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。尚未建立：`llm.py`。
+Phase 2 已落地：`orchestrator.py`、`policy.py`、`python main.py agent`（見 [`Phase2.md`](./Phase2.md)）。Phase 3 已落地：`audit.py`、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。Phase 4 已落地：`llm.py`、`python main.py schedule`（見 [`Phase4.md`](./Phase4.md)）。
 
 ---
 
@@ -202,7 +202,7 @@ mcp
 
 不要在 Arguments 加 `--transport streamable-http`。Add → Connect → List Tools。演示：`fetch_chips`（`stocks: ["2330"]`）→ `run_report_gate`（`stock_id: "2330"`, `skip_pdf: true`）。2330 無持股，不要呼叫 `run_position_gate`。
 
-**給 Cursor 長期用**（同一條指令，由 Cursor 拉起，不必開 Inspector）：
+**給 Cursor 長期用**（同一條指令，由 Cursor 拉起，不必開 Inspector）。專案已放 [`.cursor/mcp.json`](../.cursor/mcp.json)；Agent 對話怎麼跑、實測紀錄見 [`mcp-cursor.md`](./mcp-cursor.md)。
 
 ```json
 {
@@ -297,7 +297,13 @@ Connect → List Tools，之後呼叫順序與 §5.1 相同。這句「連 URL�
 
 ---
 
-## 8. 下一階段
+## 8. 現場 demo
 
-Phase 2 落地見 [`Phase2.md`](./Phase2.md)；Phase 3 落地見 [`Phase3.md`](./Phase3.md)。LLM 只做意圖 → 結構化 plan；執行仍呼叫本層 MCP／`agent.tools`。`send_digest` 預設繼續 blocked，audit 可重放。
+這是現場主線的第一段：Cursor Agent 對 2330 `fetch_chips` → `run_report_gate`。步驟與 prompt 見 [`mcp-cursor.md`](./mcp-cursor.md)。接著指 facts／gate 產物，再接到 Phase 4 共用盤前 brief。Phase 2／3 不當 live 主線，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
+
+---
+
+## 9. 下一階段
+
+Cursor／Inspector 現場操作與 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。Phase 2–4 見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)、[`Phase4.md`](./Phase4.md)。
 

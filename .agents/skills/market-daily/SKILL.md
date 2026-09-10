@@ -9,6 +9,7 @@ description: 台股開盤前戰術 brief：當日量價／三大法人／技術�
 
 台北時間**交易日 15:00 起**，`trade_date` 可切到當日（法人資料約此時可用）；此前仍對應**上一交易日**。  
 **美股**依台北 **05:30** cutover：過了用最新已完成那指／費半 session；05:30 前仍用前一日美股。  
+05:30 後抓美股失敗會重試，**不會**默默 `--skip-us`。全站共用一份產物；排程見 `python main.py schedule --once`。  
 報告服務的是 `for_session`（下一台股交易日）開盤偏誤，不是單點漲跌預測。
 
 Python 組 deterministic facts（加權量價、三大法人、MA／區間位置、2330、Yahoo 那指／費半日報酬），agy 寫短敘事，規則驗證閉環。

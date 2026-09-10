@@ -64,6 +64,13 @@ def resolve_agy_bin() -> str:
 
 
 def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, int]:
+    try:
+        from agent.llm import complete
+
+        return complete(prompt, timeout_sec=timeout_sec), 0
+    except ImportError:
+        pass
+
     ensure_paths()
     from agy_output import agy_output_usable, clean_agy_output
 
@@ -141,6 +148,9 @@ def run_gate(
     skip_fetch: bool,
     skip_us: bool,
     validate_only: bool,
+    require_us: bool | None = None,
+    us_attempts: int = 3,
+    us_backoff_sec: float = 15.0,
 ) -> int:
     out_dir = market_output_dir(window.trade_date)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -159,10 +169,30 @@ def run_gate(
         return EXIT_OK if result.passed else EXIT_VALIDATION_FAILED
 
     ensure_tsmc_csv(window, skip_fetch=skip_fetch)
-    facts_obj = build_market_day_facts(window, skip_us=skip_us)
+    must_have_us = (
+        bool(require_us)
+        if require_us is not None
+        else (not skip_us and bool(window.us_cutover_passed))
+    )
+    try:
+        facts_obj = build_market_day_facts(
+            window,
+            skip_us=skip_us,
+            require_us=must_have_us,
+            us_attempts=us_attempts,
+            us_backoff_sec=us_backoff_sec,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if must_have_us:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_NO_DATA
+        raise
     facts_file = write_facts_json(facts_obj)
     facts = facts_obj.to_dict()
     print(f"PROGRESS: wrote {facts_file}", file=sys.stderr)
+    if must_have_us and not (facts.get("us") or {}).get("available"):
+        print("ERROR: 美股指數抓取失敗（已重試，不略過）", file=sys.stderr)
+        return EXIT_NO_DATA
 
     if skip_agy:
         print("PROGRESS: skip-agy；僅產出 facts.json", file=sys.stderr)
@@ -270,7 +300,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-us",
         action="store_true",
-        help="略過那斯達克／費半日報酬抓取",
+        help="略過那斯達克／費半日報酬抓取（排程與 05:30 後預設禁止）",
+    )
+    parser.add_argument(
+        "--us-attempts",
+        type=int,
+        default=3,
+        help="美股抓取重試次數（預設 3，失敗不略過）",
+    )
+    parser.add_argument(
+        "--us-backoff",
+        type=float,
+        default=15.0,
+        help="美股重試間隔秒數（預設 15）",
     )
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
@@ -297,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
         skip_fetch=args.skip_fetch,
         skip_us=args.skip_us,
         validate_only=args.validate_only,
+        us_attempts=max(1, args.us_attempts),
+        us_backoff_sec=max(0.0, args.us_backoff),
     )
 
 

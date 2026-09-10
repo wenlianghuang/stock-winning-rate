@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.tools._paths import ROOT, ensure_paths
 from agent.tools._types import EXIT_AGY_MISSING, EXIT_FAILED, EXIT_OK, ToolResult
 
 AGY_TIMEOUT_SEC = 900
@@ -83,38 +79,9 @@ def build_digest_prompt(digest_date: str, items: list[DigestItem]) -> str:
 
 
 def _run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
-    ensure_paths()
-    from agy_output import agy_output_usable, clean_agy_output
+    from agent.llm import complete
 
-    custom = os.environ.get("AGY_BIN", "").strip()
-    agy_bin = custom or shutil.which("agy")
-    if not agy_bin:
-        raise FileNotFoundError("找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。")
-
-    try:
-        result = subprocess.run(
-            [
-                agy_bin,
-                "-p",
-                prompt,
-                "--dangerously-skip-permissions",
-                "--print-timeout",
-                "15m",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
-
-    raw = result.stdout or result.stderr or ""
-    body = clean_agy_output(raw)
-    if not agy_output_usable(body, min_chars=20):
-        detail = body[:200] if body else "(空)"
-        raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
-    return body
+    return complete(prompt, timeout_sec=timeout_sec)
 
 
 def draft_digest(inp: DraftDigestInput | None = None, **overrides: Any) -> DraftDigestResult:

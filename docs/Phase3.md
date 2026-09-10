@@ -57,7 +57,7 @@ LLM 仍然不能自己寄信、不能改持股、不能對無持倉跑部位。P
 
 Audit 寫在 `reports/agent/{交易日}/run_{run_id}.jsonl`（`reports/` 已 gitignore）。`--replay` 讀同一份檔，不重跑 agy。
 
-尚未建立（留給 Phase 4）：`llm.py` adapter、收盤後排程。
+Phase 4 已落地：`llm.py` adapter、05:30 共用盤前排程（見 [`Phase4.md`](./Phase4.md)）。
 
 ---
 
@@ -117,7 +117,7 @@ Position 交接加嚴：有持倉之後還要 `report_ok` 與 facts。`--skip-re
 
 `summarize_args` 會丢掉 `markdown` / `prompt` / `items` 本文，只留 `stock_id`、日期、旗標與 `items_count`。重放不需要報告全文。
 
-`parse_gate_log` 讀既有 `*.gate.log`（JSONL，每輪含 `issue_codes`）。測試不必碰真實檔：dispatch 回傳 `gate_rounds` 即可。`handoffs_from_gate_rounds` 把「第 1 輪 fail → 第 2 輪 pass」編成 Research↔Validator 交接，對應 roadmap 演示第 3 條：audit 看得到 `issue_codes` 與下一輪通過。
+`parse_gate_log` 讀既有 `*.gate.log`（JSONL，每輪含 `issue_codes`）。測試不必碰真實檔：dispatch 回傳 `gate_rounds` 即可。`handoffs_from_gate_rounds` 把「第 1 輪 fail → 第 2 輪 pass」編成 Research↔Validator 交接，對應 roadmap §8.1 第 3 條：audit 看得到 `issue_codes` 與下一輪通過（現場不必重放）。
 
 `replay_audit` / `format_replay` 重建 tools、actors、handoffs、issue rounds，以及「send 有沒有出現在 log」。處理持股的完成條件是：**log 裡沒有成功的 send_digest，digest 停在 blocked／未執行。**
 
@@ -258,8 +258,18 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 
 ---
 
-## 7. 下一階段
+## 7. 現場 demo
 
-Phase 4（[`agent-roadmap.md`](./agent-roadmap.md)）：交易日 21:30 後排程 Data → Daily → 持股 Research／Position → digest 草稿；寄信仍要一次核准。LLM backend 走同一 adapter（agy / Ollama），Orchestrator 不綁死 agy。可選把同一組 MCP tools 給 Copilot Studio custom connector。
+現場**不要**把本階段當獨立戲份。這裡不是六個 process，也不是第二層 retry：Validator 交接是事後讀 `.gate.log`，既有 gate loop 的多角色版。`--role chat` 拆空 plan、`--replay` JSONL 對懂 A2A 的人資訊密度低。
 
-面試可以講：一句話處理持股；audit 看得到第一輪 `issue_codes` 與 Validator 打回；chat 角色寄不出信；關掉 send 權限時只留草稿。數字仍由 harness 算、gate 擋住。
+閉環用 Phase 1 產出來的 `.gate.log` 就能講。職缺提到權限／審計時口頭對應：角色 allowlist、`send_digest` 預設關、JSONL 可重放、不下單。程式與 `tests/test_phase3.py` 保留。
+
+現場主線：MCP 2330 → facts／gate 產物 → 05:30 共用 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
+
+---
+
+## 8. 下一階段
+
+Phase 4 落地見 [`Phase4.md`](./Phase4.md)：台北 05:30 後產一份全站共用開盤前 brief；美股失敗重試、不略過；持股仍不進排程。
+
+面試可以講：一句話處理持股；audit 看得到第一輪 `issue_codes` 與 Validator 打回；chat 角色寄不出信；關掉 send 權限時只留草稿。數字仍由 harness 算、gate 擋住。現場不必重跑 holdings 或 replay。

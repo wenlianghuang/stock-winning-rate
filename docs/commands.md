@@ -52,6 +52,11 @@ uv run --extra ui --extra stock python main.py market-daily -- --date 2026-08-13
 uv run --extra ui --extra stock python main.py market-daily -- --resolve-only
 uv run --extra ui --extra stock python main.py market-daily -- --skip-agy --skip-fetch
 
+# Phase 4：05:30 後產一份全站共用 brief（美股失敗會重試，不略過）
+uv run --extra stock --extra ui python main.py schedule --once --dry-run
+uv run --extra stock --extra ui python main.py schedule --once
+```
+
 # 週報（週五 17:30 cutover）
 uv run --extra ui --extra stock python main.py market-weekly
 uv run --extra ui --extra stock python main.py market-weekly -- --week-end 2026-07-31
@@ -98,7 +103,7 @@ uv run --extra tech python main.py tech-news -- --hours 72
 
 ## MCP（給 Agent，不是日常產報）
 
-細節見 [`Phase1.md`](./Phase1.md) §5。兩種連法擇一：stdio 由 Inspector／Cursor 拉起 process；streamable-http 才需要你先開 HTTP，且不要用瀏覽器打開 `/mcp`。網站仍走 `python main.py api`。
+細節見 [`Phase1.md`](./Phase1.md) §5。Cursor 掛 MCP、演示 prompt、2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。兩種連法擇一：stdio 由 Inspector／Cursor 拉起 process；streamable-http 才需要你先開 HTTP，且不要用瀏覽器打開 `/mcp`。網站仍走 `python main.py api`。
 
 ```bash
 uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
@@ -109,6 +114,8 @@ uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 ## Orchestrator（一句話意圖，Phase 2–3）
 
 細節見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 權限預設關閉，只產草稿並標待核准。實際執行會寫 `reports/agent/{日期}/run_{id}.jsonl`。
+
+現場 10–15 分鐘不當主線；主線是 MCP 2330 → gate 產物 → 盤前 brief，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
 ```bash
 # 處理 holdings.json 裡有均價／張數的標的（fetch → report-gate → position-gate → digest 草稿）
@@ -129,6 +136,20 @@ uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18
 # 重放 audit（不執行 tools）
 uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026-08-18/run_<id>.jsonl
 ```
+
+---
+
+## 開盤前排程（Phase 4）
+
+細節見 [`Phase4.md`](./Phase4.md)。這是全站共用 brief，不是每人持股。
+
+```bash
+uv run --extra stock --extra ui python main.py schedule --once --dry-run
+uv run --extra stock --extra ui python main.py schedule --once
+# crontab：30 5 * * *  … schedule --once
+```
+
+敘事引擎：`LLM_BACKEND=agy`（預設）或 `ollama`。
 
 ---
 

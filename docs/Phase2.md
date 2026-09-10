@@ -43,7 +43,7 @@ LLM 在這一層 **只允許** 填 plan JSON（可選 `--plan-json`）。預設 
 
 MCP server **沒有刪**。Cursor／Inspector 仍可單點呼叫 tools；Orchestrator 是「一句話」這條路。
 
-尚未建立（留給 Phase 4）：`llm.py` adapter、排程。Phase 3 已落地：`audit.py` JSONL、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。
+Phase 3 已落地：`audit.py` JSONL、角色 allowlist（見 [`Phase3.md`](./Phase3.md)）。Phase 4 已落地：`llm.py`、05:30 共用盤前排程（見 [`Phase4.md`](./Phase4.md)）。
 
 ---
 
@@ -145,9 +145,9 @@ uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持�
 先看會跑什麼、不碰網路／agy：
 
 ```bash
-uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "幫我處理今天持股"
-uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "2330 要不要動"
-uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "明天開盤怎麼看"
+uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-09-15 -- "幫我處理今天持股"
+uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-09-15 -- "2330 要不要動"
+uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-09-15 -- "明天開盤怎麼看"
 ```
 
 實際執行會寫既有產物路徑：`reports/stock/{日期}/`、`reports/market/{日期}/`。CLI 會印 plan、每步 tool、gate 通過與否（PASS／FAIL）、以及 `digest=pending_approval`。信不會寄出。
@@ -208,8 +208,18 @@ Notes:
 
 ---
 
-## 8. 下一階段
+## 8. 現場 demo
 
-Phase 3 落地見 [`Phase3.md`](./Phase3.md)：角色 allowlist、Research → Validator → Position 交接、JSONL audit 可重放；關掉 `send_digest` 權限時流程停在草稿。Phase 2 已經保證 send 預設 blocked；Phase 3 補上可重放的 log 與依角色的 allowlist。
+現場**不要**把本階段當獨立戲份。規則 planner 的 `--dry-run` 看起來像固定工作流表；真跑 `process_holdings` 又慢（agy 多輪）。Cursor 當 MCP client（Phase 1）時，模型選 tool 已經比這層規則分類強。
 
-面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。
+本階段留給職缺提到 orchestrator 時口頭講五條 policy；必要時 `--dry-run` 十秒。程式與 golden tests 保留，不是刪掉。
+
+現場主線：MCP 2330 → facts／gate 產物 → 05:30 共用 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
+
+---
+
+## 9. 下一階段
+
+Phase 3 落地見 [`Phase3.md`](./Phase3.md)。Phase 4 落地見 [`Phase4.md`](./Phase4.md)：05:30 共用盤前 brief，不是每人持股 cron。
+
+面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。現場不必真跑這一條。

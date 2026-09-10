@@ -30,6 +30,9 @@ class MarketDailyInput:
     skip_fetch: bool = False
     skip_us: bool = False
     validate_only: bool = False
+    require_us: bool | None = None
+    us_attempts: int = 3
+    us_backoff_sec: float = 15.0
 
 
 @dataclass
@@ -89,6 +92,9 @@ def run_market_daily(
             skip_fetch=params.skip_fetch,
             skip_us=params.skip_us,
             validate_only=params.validate_only,
+            require_us=params.require_us,
+            us_attempts=max(1, params.us_attempts),
+            us_backoff_sec=max(0.0, params.us_backoff_sec),
         )
     except BaseException as exc:
         exit_code = _catch_exit(exc)

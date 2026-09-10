@@ -248,8 +248,8 @@ def _register_tools(mcp: FastMCP) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(readOnlyHint=False, title="Pre-open market daily"),
         description=(
-            "開盤前戰術 brief（大盤＋2330＋那指費半）。不是個股深度報告。"
-            "可傳 trade_date 或 as_of；skip_agy / skip_fetch / skip_us 供只產 facts。"
+            "開盤前戰術 brief（大盤＋2330＋那指費半）。全站共用，不是個股深度報告。"
+            "可傳 trade_date 或 as_of。05:30 後預設必須有美股；skip_us 僅測試用，排程不會設。"
             "產物在 reports/market/{日期}/。"
         ),
     )

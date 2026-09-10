@@ -926,6 +926,7 @@ def _run_market_daily_pipeline(job_id: str, max_rounds: int) -> None:
                 max_rounds=max_rounds,
                 skip_fetch=job.skip_fetch,
                 skip_us=job.skip_us,
+                require_us=False if job.skip_us else True,
             )
         )
         _tool_error(daily_result, "run_market_daily failed")
@@ -1290,6 +1291,40 @@ def create_app() -> FastAPI:
 
         return {"job": job.to_dict()}
 
+    @app.get("/market-daily/current")
+    def current_market_daily(
+        as_of: str | None = None,
+        trade_date: str | None = None,
+    ) -> dict[str, Any]:
+        if trade_date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", trade_date):
+            raise HTTPException(status_code=400, detail="trade_date 格式須為 YYYY-MM-DD")
+        skill = str(MARKET_DAILY_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        try:
+            from market_day_signals import resolve_window_or_fail
+
+            window = resolve_window_or_fail(as_of=as_of, trade_date=trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        from agent.schedule import load_canonical_brief
+
+        brief = load_canonical_brief(window.trade_date)
+        return {
+            "window": window.as_dict(),
+            "ready": brief.ready,
+            "shared": True,
+            "brief": {
+                "trade_date": brief.trade_date,
+                "for_session": brief.for_session or window.for_session,
+                "us_available": brief.us_available,
+                "facts": brief.facts,
+                "summary": brief.summary,
+                "markdown": brief.markdown,
+                "has_report": bool(brief.markdown),
+            },
+        }
+
     @app.get("/market-daily/resolve")
     def resolve_market_daily(
         as_of: str | None = None,
@@ -1310,6 +1345,8 @@ def create_app() -> FastAPI:
 
     @app.get("/market-daily")
     def list_market_daily() -> dict[str, Any]:
+        from agent.schedule import load_canonical_brief
+
         items: list[dict[str, Any]] = []
         if MARKET_ROOT.exists():
             for day_dir in sorted(MARKET_ROOT.iterdir(), reverse=True):
@@ -1329,17 +1366,22 @@ def create_app() -> FastAPI:
                     facts = json.loads(facts_file.read_text(encoding="utf-8"))
                 if md_file.exists():
                     markdown = md_file.read_text(encoding="utf-8")
+                brief = load_canonical_brief(day_dir.name)
                 items.append(
                     {
                         "trade_date": day_dir.name,
-                        "for_session": (facts or summary or {}).get("for_session"),
+                        "for_session": brief.for_session
+                        or (facts or summary or {}).get("for_session"),
                         "summary": summary,
                         "facts": facts,
                         "markdown": markdown,
                         "has_report": md_file.exists(),
+                        "ready": brief.ready,
+                        "us_available": brief.us_available,
+                        "shared": True,
                     }
                 )
-        return {"items": items[:30]}
+        return {"items": items[:30], "shared": True}
 
     @app.get("/market-daily/jobs/{job_id}")
     def get_market_daily_job(job_id: str) -> dict[str, Any]:
@@ -1366,13 +1408,18 @@ def create_app() -> FastAPI:
         facts_path = out_dir / "tw_market_daily.facts.json"
         summary_path = out_dir / "tw_market_daily.summary.json"
 
+        from agent.schedule import load_canonical_brief
+
+        existing = load_canonical_brief(window.trade_date)
+        reuse = not body.force and existing.ready
+        if body.skip_us:
+            reuse = (
+                not body.force
+                and md_path.exists()
+                and facts_path.exists()
+                and summary_path.exists()
+            )
         job_id = uuid.uuid4().hex
-        reuse = (
-            not body.force
-            and md_path.exists()
-            and facts_path.exists()
-            and summary_path.exists()
-        )
         job = MarketDailyJob(
             id=job_id,
             as_of=body.as_of,

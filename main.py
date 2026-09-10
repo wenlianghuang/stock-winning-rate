@@ -113,10 +113,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {name:<16} {script.relative_to(ROOT)}{extra_hint}")
         print(f"  {'mcp':<16} agent/mcp_server.py (extra: mcp,stock,ui)")
         print(f"  {'agent':<16} agent/orchestrator.py (extra: stock,ui)")
+        print(f"  {'schedule':<16} agent/schedule.py (extra: stock,ui)  05:30 共用盤前 brief")
         print("\nExample: uv run --extra stock python main.py stock-report --stocks 2330")
         print("         uv run --extra server --extra ui --extra stock python main.py api")
         print("         uv run --extra mcp --extra stock --extra ui python main.py mcp")
         print('         uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持股"')
+        print("         uv run --extra stock --extra ui python main.py schedule --once")
         return 0
 
     command = argv[0]
@@ -128,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
         from agent.orchestrator import main as run_agent
 
         return run_agent(argv[1:])
+    if command == "schedule":
+        from agent.schedule import main as run_schedule
+
+        return run_schedule(argv[1:])
 
     if command not in COMMANDS:
         print(f"ERROR: unknown command: {command}", file=sys.stderr)
