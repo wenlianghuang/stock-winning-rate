@@ -179,7 +179,7 @@ uv run --extra server --extra ui --extra stock python main.py api
 ```bash
 # 回補歷史快照 → reports/stock/{日期}/
 python tools/backfill_history.py --stocks 2330,2409 --start 2026-04-07 --end 2026-08-18
-
+python tools/backfill_history.py
 # 事後標籤 → reports/outcomes/outcomes.jsonl
 uv run python main.py outcome-label
 
