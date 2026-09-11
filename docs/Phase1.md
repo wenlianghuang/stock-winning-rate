@@ -299,11 +299,11 @@ Connect → List Tools，之後呼叫順序與 §5.1 相同。這句「連 URL�
 
 ## 8. 現場 demo
 
-這是現場主線的第一段：Cursor Agent 對 2330 `fetch_chips` → `run_report_gate`。步驟與 prompt 見 [`mcp-cursor.md`](./mcp-cursor.md)。接著指 facts／gate 產物，再接到 Phase 4 共用盤前 brief。Phase 2／3 不當 live 主線，也不是 A2A 演示，見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。
+這是現場主線的第一段：Cursor Agent 對 2330 `fetch_chips` → `run_report_gate`。步驟與 prompt 見 [`mcp-cursor.md`](./mcp-cursor.md)。接著指 facts／gate 產物，再接到 Phase 4 共用盤前 brief。Phase 2／3 不當 live 主線；A2A 用 Phase 5 的 Card，不是本階段。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。
 
 ---
 
 ## 9. 下一階段
 
-Cursor／Inspector 現場操作與 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。Phase 2–4 見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)、[`Phase4.md`](./Phase4.md)。
+Cursor／Inspector 現場操作與 2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。Phase 2–5 見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)、[`Phase4.md`](./Phase4.md)、[`Phase5.md`](./Phase5.md)。
 

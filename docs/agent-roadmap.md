@@ -4,7 +4,7 @@
 
 網站（`stock-report-site`）當導入層，STT（`AI_Speech/stt`）當語音 tool。本文件只規劃 `stock-winning-rate` 本體；相鄰 repo 的接點寫在最後一節。
 
-命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。
+命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。
 
 ---
 
@@ -49,11 +49,11 @@
 | HTTP 工作流 | `api/stock_api.py` | `/jobs`、`/digest`、portfolio／market jobs |
 | 品質回饋 | `tools/gate_stats.py`、`outcome-label`、`calibrate` | 校準與事後標籤 |
 
-`pyproject.toml` 已有 `mcp` extra（`mcp>=1.28,<2`），尚未實作 server。
+`pyproject.toml` 的 `mcp` extra 在 Phase 1 落地；`a2a` extra 在 Phase 5 落地。
 
 ### 缺（本路線要補）
 
-Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見各 Phase 文件）。Agent2Agent 協定不在這張清單裡，見 §5 與 [`a2a.md`](./a2a.md)。
+Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見各 Phase 文件）。A2A 協定在 Phase 5，見 [`Phase5.md`](./Phase5.md) 與 [`a2a.md`](./a2a.md)。
 
 - MCP tool 介面（依賴已宣告、程式沒有）→ Phase 1
 - Orchestrator：自然語言／結構化意圖 → 選 tool、填參數、處理失敗 → Phase 2
@@ -61,6 +61,7 @@ Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見�
 - 權限：誰能跑什麼、寄信／發布是否要人確認
 - 審計：每次 tool call 的輸入、輸出摘要、耗時、結果
 - 排程型「類 RPA」：台北 05:30 後產一份全站共用開盤前 brief（不夜跑每人持股）→ Phase 4
+- Agent2Agent：一個對外 server（Card + JSON-RPC），仍進 `run_agent` → Phase 5
 
 ---
 
@@ -86,12 +87,12 @@ Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見�
               validate-*
 ```
 
-圖裡的 Data／Research／… 是 **邏輯角色**，跑在同一個 Orchestrator process。它們沒有各自的 Agent Card，也沒有用 Agent2Agent 協定互叫。職缺的 A2A 會是「Studio 或其他 Agent ↔ 本系統」的另一條線，本路線沒做。見 [`a2a.md`](./a2a.md)。
+圖裡的 Data／Research／… 是 **邏輯角色**，跑在同一個 Orchestrator process。它們沒有各自的 Agent Card，也沒有用 Agent2Agent 協定互叫。職缺的 A2A 是「Studio 或其他 Agent ↔ 本系統」的另一條線：Phase 5 用**一個** A2A server 包 `run_agent`。見 [`a2a.md`](./a2a.md)、[`Phase5.md`](./Phase5.md)。
 
-同一組 tool 三種入口共用：Orchestrator、現有 FastAPI、MCP。Copilot Studio **custom connector** 若接，接的是 HTTP／MCP 工具層，**不是** Studio 的「Add A2A agent」。  
+同一組 tool 四種入口共用：Orchestrator、現有 FastAPI、MCP、A2A。Copilot Studio **custom connector** 若接，接的是 HTTP／MCP 工具層；**Add A2A agent** 接 Phase 5 的 `python main.py a2a`。  
 **不要**為 Microsoft 棧重做整套台股邏輯。
 
-角色對應現有程式（先當邏輯邊界，**不是** 六個 A2A server）：
+角色對應現有程式（先當邏輯邊界，**不是** 六個 A2A server；A2A 只有一個對外 runtime）：
 
 | 角色 | 現有模組 | 職責 |
 |-------|----------|------|
@@ -213,6 +214,17 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 
 完成定義：不用人按「產生日報」，05:30 後每位登入者看到同一份 `for_session` brief；持股報告仍手動。
 
+### Phase 5 — Agent2Agent server
+
+落地說明（一個 Card、JSON-RPC task、仍進 orchestrator）見 [`Phase5.md`](./Phase5.md)。
+
+- `python main.py a2a` 啟動 A2A server；`GET /.well-known/agent-card.json`。
+- Client `SendMessage` 一句話 → `run_agent`；policy 不變（無持倉不 position、send 需核准）。
+- 三個 skill 是 Card 廣告，不是三個 process。
+- 可選 Bearer；本階段不做 OAuth。
+
+完成定義：最小 client（測試裡的 TestClient 或 curl）能讀 Card，並 dry-run 完「2330 要不要動」得到 completed task、plan 不含 position。
+
 ---
 
 ## 5. 明確不做
@@ -221,8 +233,8 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 - 不把 STT、Next.js、Supabase 搬進本 repo。
 - 不接券商下單、不自動改持股。
 - 不用 Copilot Studio 重寫籌碼／gate。
-- **不實作 Agent2Agent（A2A）協定**（無 Agent Card、無 A2A HTTP、無跨 runtime 委派）。Phase 2／3 也不得改稱 A2A 經驗。若以後要給 Studio 當 A2A client 呼叫，另開階段把現有 Agent 包成 A2A server，仍進 `agent.tools`。見 [`a2a.md`](./a2a.md)。
-- 不把 MCP、Orchestrator、排程在同一個 PR 一次做完。
+- **不把 Data／Research／Position 拆成多個 A2A server。** Phase 5 只有一個對外 Agent Card，被叫到仍進 `agent.tools`。Phase 2／3 也不得改稱 A2A 經驗。見 [`a2a.md`](./a2a.md)。
+- 不把 MCP、Orchestrator、排程、A2A 在同一個 PR 一次做完（A2A 已另開 Phase 5）。
 
 ---
 
@@ -239,9 +251,10 @@ agent/
   audit.py        # Phase 3 JSONL
   llm.py          # Phase 4 adapter
   schedule.py     # Phase 4：05:30 共用盤前 brief
+  a2a_server.py   # Phase 5：一個 A2A server
 ```
 
-`main.py` 加子命令：`mcp`、`agent`。  
+`main.py` 加子命令：`mcp`、`agent`、`schedule`、`a2a`。  
 `api/stock_api.py` 逐步改呼叫 `agent.tools`，行為對網站保持相容。
 
 ---
@@ -253,13 +266,13 @@ agent/
 | `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 開盤前日報讀全站共用 brief（Phase 4）。寄信仍可之後吃 pending digest。 |
 | `AI_Speech/stt` | `transcribe_voice` tool | 本 repo 最多加一個可選 MCP tool 轉打 STT HTTP；不在本 repo 擴 whisper。 |
 
-面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。MCP 有實作；A2A 協定沒有。Phase 2／3 是編排與權限。
+面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。MCP 給 Cursor 選 tool；A2A 給另一個 Agent runtime 發現並委派。Phase 2／3 是編排與權限，不是 A2A。
 
 ---
 
 ## 8. 演示：路線完成 vs 現場腳本
 
-整條路線結束時，§8.1 都要**能指著程式或測試講**。現場 10–15 分鐘**不要**依序演完每一 Phase。Phase 2／3 對職缺的 **orchestrator／權限／審計** 有用，對 **A2A 關鍵字沒有**（見 [`a2a.md`](./a2a.md)）；對「讓人看見系統在做事」幾乎沒有增量。當口頭對應，不要當第二、第三個 live 流程。
+整條路線結束時，§8.1 都要**能指著程式或測試講**。現場 10–15 分鐘**不要**依序演完每一 Phase。Phase 2／3 對職缺的 **orchestrator／權限／審計** 有用，對 **A2A 關鍵字**要用 Phase 5 的 Card／JSON-RPC，不要拿角色標籤充當（見 [`a2a.md`](./a2a.md)）。Phase 2／3 當口頭對應，不要當第二、第三個 live 流程。
 
 ### 8.1 路線完成定義（工程上要有，不必現場全跑）
 
@@ -268,6 +281,7 @@ agent/
 3. report-gate 第一輪失敗時，audit／`.gate.log` 看得到 `issue_codes` 與下一輪通過。
 4. `send_digest` 預設 blocked，只有草稿 + 待核准。
 5. 同一組 tools 可用 MCP inspector 或 Cursor Agent 單獨點名呼叫（Cursor 實測見 [`mcp-cursor.md`](./mcp-cursor.md)）。
+6. 另一個 Agent 可發現本系統：`python main.py a2a --print-card`；dry-run `SendMessage` 完 2330 無 position（見 [`Phase5.md`](./Phase5.md)）。
 
 Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要為了演示刪 `orchestrator.py`／`audit.py`——政策（無持倉不部位、寄信要核准、budget）仍是這條線跟「包一層 LLM 呼叫 script」的差別。
 
@@ -284,13 +298,13 @@ Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要
 為什麼 Phase 2／3 不當 live 主線：
 
 - Phase 1 的 Cursor client **已經**在用自然語言選 tool；預設 planner 是規則分類（關鍵字 + 四碼代號），dry-run 看起來像固定工作流表，現場比 MCP 弱。
-- Phase 3 不是六個 process，更不是 Agent2Agent。Validator「交接」是事後讀 `.gate.log`，既有 gate loop 的多角色標籤。若講成 A2A，懂協定的人會問 Agent Card，專案對不上。
+- Phase 3 不是六個 process，更不是 Agent2Agent。Validator「交接」是事後讀 `.gate.log`，既有 gate loop 的多角色標籤。若講成 A2A，懂協定的人會問 Agent Card——那張 Card 在 Phase 5，不在本階段。
 
 職缺關鍵字怎麼對：
 
 - **MCP**：現場主線第一段（真的有）。
 - **orchestrator／權限／審計**：口頭對應 Phase 2／3——意圖進可測 plan；模型不能靠 JSON 偷寄信；每次 tool 有 actor + JSONL；不下單。
-- **A2A（Agent2Agent）**：承認沒做協定；不要用 Phase 2／3 充當。
+- **A2A（Agent2Agent）**：Phase 5 的一個 server。`--print-card` 或 curl well-known；不要用 Phase 2／3 充當，也不要現場真跑 agy。
 
 ---
 
@@ -301,3 +315,4 @@ Golden fixtures 與 Phase 3 測試覆蓋 1–4；5 用 Cursor 現場跑。不要
 3. 再把 position、daily、digest draft 收進 tool 層，進入 Phase 2 的「處理持股」意圖。
 4. Phase 3 權限／審計與 Phase 2 可重疊，但 allowlist 測試要先有。不要在這一階段做 A2A server。
 5. Phase 4：05:30 共用盤前 brief（不要做成每人持股 cron）。
+6. Phase 5：一個 A2A server 包 `run_agent`（不要拆成多個 Card）。

@@ -1,1 +1,1 @@
-"""Agent package: tools, MCP, orchestrator, audit, llm adapter, pre-market schedule."""
+"""Agent package: tools, MCP, A2A, orchestrator, audit, llm adapter, pre-market schedule."""

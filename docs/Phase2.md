@@ -214,7 +214,7 @@ Notes:
 
 現場**不要**把本階段當獨立戲份。規則 planner 的 `--dry-run` 看起來像固定工作流表；真跑 `process_holdings` 又慢（agy 多輪）。Cursor 當 MCP client（Phase 1）時，模型選 tool 已經比這層規則分類強。
 
-本階段留給職缺提到 orchestrator／自主決策時口頭講五條 policy；必要時 `--dry-run` 十秒。程式與 golden tests 保留，不是刪掉。職缺若問 **A2A**，不要用本階段回答——那是 Agent2Agent 協定，這裡沒做。見 [`a2a.md`](./a2a.md)。
+本階段留給職缺提到 orchestrator／自主決策時口頭講五條 policy；必要時 `--dry-run` 十秒。程式與 golden tests 保留，不是刪掉。職缺若問 **A2A**，不要用本階段回答——那是 Agent2Agent 協定，在 [`Phase5.md`](./Phase5.md)。見 [`a2a.md`](./a2a.md)。
 
 現場主線：MCP 2330 → facts／gate 產物 → 05:30 共用 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
@@ -222,6 +222,6 @@ Notes:
 
 ## 9. 下一階段
 
-Phase 3 落地見 [`Phase3.md`](./Phase3.md)。Phase 4 落地見 [`Phase4.md`](./Phase4.md)：05:30 共用盤前 brief，不是每人持股 cron。
+Phase 3 落地見 [`Phase3.md`](./Phase3.md)。Phase 4 落地見 [`Phase4.md`](./Phase4.md)：05:30 共用盤前 brief，不是每人持股 cron。A2A 見 [`Phase5.md`](./Phase5.md)。
 
 面試可以講：人只說「處理今天持股」，程式列出 plan、有持倉才跑部位、信停在待核准；模型不能改這幾條規則。這是單 process 編排，不是兩個 Agent 用 A2A 互叫。現場不必真跑這一條。

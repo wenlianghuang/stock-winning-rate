@@ -3,7 +3,7 @@
 專案根目錄執行。統一入口是 `main.py`；細節見各 skill 的 `SKILL.md`。
 
 ```bash
-uv sync --extra stock --extra ui --extra server --extra tech --extra mcp
+uv sync --extra stock --extra ui --extra server --extra tech --extra mcp --extra a2a
 python main.py --list
 ```
 
@@ -103,7 +103,7 @@ uv run --extra tech python main.py tech-news -- --hours 72
 
 ## MCP（給 Agent，不是日常產報）
 
-細節見 [`Phase1.md`](./Phase1.md) §5。Cursor 掛 MCP、演示 prompt、2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。兩種連法擇一：stdio 由 Inspector／Cursor 拉起 process；streamable-http 才需要你先開 HTTP，且不要用瀏覽器打開 `/mcp`。網站仍走 `python main.py api`。這是 MCP（Agent → 工具），不是 A2A；見 [`a2a.md`](./a2a.md)。
+細節見 [`Phase1.md`](./Phase1.md) §5。Cursor 掛 MCP、演示 prompt、2330／3711 實測見 [`mcp-cursor.md`](./mcp-cursor.md)。兩種連法擇一：stdio 由 Inspector／Cursor 拉起 process；streamable-http 才需要你先開 HTTP，且不要用瀏覽器打開 `/mcp`。網站仍走 `python main.py api`。這是 MCP（Agent → 工具）；Agent → Agent 見下一節與 [`a2a.md`](./a2a.md)。
 
 ```bash
 uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
@@ -111,11 +111,25 @@ uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 
 ---
 
+## Agent2Agent（給另一個 Agent，Phase 5）
+
+細節見 [`Phase5.md`](./Phase5.md)。用語對照見 [`a2a.md`](./a2a.md)。這是獨立 HTTP process：Card + JSON-RPC task，被叫到仍走 orchestrator／`agent.tools`。不是把 Phase 2／3 的角色拆成多個 server。預設埠 `9999`。演示用 `--dry-run`，避免一接上就跑 agy。
+
+```bash
+uv run --extra a2a --extra stock --extra ui python main.py a2a --print-card
+uv run --extra a2a --extra stock --extra ui python main.py a2a --list-skills
+uv run --extra a2a --extra stock --extra ui python main.py a2a --dry-run --date 2026-08-18
+```
+
+Card：`http://127.0.0.1:9999/.well-known/agent-card.json`。JSON-RPC：`POST http://127.0.0.1:9999/`（method `SendMessage`，建議 header `A2A-Version: 1.0`）。
+
+---
+
 ## Orchestrator（一句話意圖，Phase 2–3）
 
 細節見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 權限預設關閉，只產草稿並標待核准。實際執行會寫 `reports/agent/{日期}/run_{id}.jsonl`。
 
-這是單 process 的意圖編排與角色 allowlist，**不是** Agent2Agent 協定。對照見 [`a2a.md`](./a2a.md)。
+這是單 process 的意圖編排與角色 allowlist，**不是** Agent2Agent 協定。A2A 入口是 `python main.py a2a`，見 [`Phase5.md`](./Phase5.md)、[`a2a.md`](./a2a.md)。
 
 現場 10–15 分鐘不當主線；主線是 MCP 2330 → gate 產物 → 盤前 brief，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 

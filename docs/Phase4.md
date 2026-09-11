@@ -124,4 +124,4 @@ API：`GET /market-daily/current` 回傳日窗 + 是否 ready；`GET /market-dai
 
 面試可以講：05:30 機器人產一份共用開盤 brief；美股掛了就重試，不會假裝沒有外盤；使用者進站看到同一份，部位分析仍跟人走。
 
-現場這是主線第三段（MCP 2330 → gate 產物 → 本階段 brief）。不要先花時間跑 Phase 2／3 的 agent CLI，也不要把盤前排程講成 A2A。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。
+現場這是主線第三段（MCP 2330 → gate 產物 → 本階段 brief）。不要先花時間跑 Phase 2／3 的 agent CLI，也不要把盤前排程講成 A2A（A2A 見 [`Phase5.md`](./Phase5.md)）。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。

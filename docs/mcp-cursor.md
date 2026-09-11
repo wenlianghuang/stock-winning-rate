@@ -146,4 +146,4 @@ Settings MCP 綠燈 → 貼 §2.3 prompt → 核准兩個 tool → 指著 chat �
 
 這是現場主線第一段，不是暖身。接著指 gate 產物，再接到當天共用盤前 brief（Phase 4）。**不要**接著跑 `python main.py agent` 處理持股、`--replay` 或 `--role chat`——那些是路線完成條件，不當 live 戲份。見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
-收句：同一組 tools，網站走 HTTP，Cursor 走 MCP。職缺的 A2A 本 repo 沒做，不要在這段演示結尾說「這就是 A2A」。見 [`a2a.md`](./a2a.md)。
+收句：同一組 tools，網站走 HTTP，Cursor 走 MCP。職缺的 A2A 是另一個入口（`python main.py a2a`），不要在 MCP 演示結尾說「這就是 A2A」。見 [`a2a.md`](./a2a.md)、[`Phase5.md`](./Phase5.md)。

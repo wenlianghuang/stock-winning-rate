@@ -112,11 +112,13 @@ def main(argv: list[str] | None = None) -> int:
             extra_hint = f" (extra: {extra})" if extra else ""
             print(f"  {name:<16} {script.relative_to(ROOT)}{extra_hint}")
         print(f"  {'mcp':<16} agent/mcp_server.py (extra: mcp,stock,ui)")
+        print(f"  {'a2a':<16} agent/a2a_server.py (extra: a2a,stock,ui)  Agent2Agent")
         print(f"  {'agent':<16} agent/orchestrator.py (extra: stock,ui)")
         print(f"  {'schedule':<16} agent/schedule.py (extra: stock,ui)  05:30 共用盤前 brief")
         print("\nExample: uv run --extra stock python main.py stock-report --stocks 2330")
         print("         uv run --extra server --extra ui --extra stock python main.py api")
         print("         uv run --extra mcp --extra stock --extra ui python main.py mcp")
+        print("         uv run --extra a2a --extra stock --extra ui python main.py a2a --print-card")
         print('         uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持股"')
         print("         uv run --extra stock --extra ui python main.py schedule --once")
         return 0
@@ -126,6 +128,16 @@ def main(argv: list[str] | None = None) -> int:
         from agent.mcp_server import main as run_mcp
 
         return run_mcp(argv[1:])
+    if command == "a2a":
+        try:
+            from agent.a2a_server import main as run_a2a
+        except ImportError:
+            print(
+                "ERROR: A2A extra missing. Install: uv sync --extra a2a --extra stock --extra ui",
+                file=sys.stderr,
+            )
+            return 1
+        return run_a2a(argv[1:])
     if command == "agent":
         from agent.orchestrator import main as run_agent
 

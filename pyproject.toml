@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Taiwan stock chip analysis and US tech market reports"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.139.0",
     "pandas>=3.0.3",
     "python-dotenv>=1.0.0",
 ]
@@ -22,3 +23,7 @@ server = [
     "requests>=2.28.0",
 ]
 mcp = ["mcp>=1.28,<2"]
+a2a = [
+    "a2a-sdk[http-server]>=1.0,<2",
+    "uvicorn[standard]>=0.32.0",
+]

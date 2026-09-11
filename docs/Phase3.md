@@ -240,7 +240,7 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 - `docs/agent-roadmap.md` — Phase 3 指向本文件
 - `docs/Phase0.md`、`docs/Phase1.md`、`docs/Phase2.md` — 下一階段連結
 
-沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。沒有實作 Agent2Agent。
+沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。本階段沒有實作 Agent2Agent（協定在 [`Phase5.md`](./Phase5.md)）。
 
 ---
 
@@ -262,7 +262,7 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 
 ## 7. 現場 demo
 
-現場**不要**把本階段當獨立戲份。這裡不是六個 process，不是 Agent2Agent，也不是第二層 retry：Validator 標籤是事後讀 `.gate.log`，既有 gate loop 的多角色版。`--role chat` 拆空 plan、`--replay` JSONL 對懂 A2A **協定**的人不能當 A2A 演示——沒有 Card、沒有跨 Agent HTTP。
+現場**不要**把本階段當獨立戲份。這裡不是六個 process，不是 Agent2Agent，也不是第二層 retry：Validator 標籤是事後讀 `.gate.log`，既有 gate loop 的多角色版。`--role chat` 拆空 plan、`--replay` JSONL 對懂 A2A **協定**的人不能當 A2A 演示——Card 與跨 Agent HTTP 在 [`Phase5.md`](./Phase5.md)。
 
 閉環用 Phase 1 產出來的 `.gate.log` 就能講。職缺提到權限／審計時口頭對應：角色 allowlist、`send_digest` 預設關、JSONL 可重放、不下單。職缺提到 **A2A** 時不要用本階段充數。程式與 `tests/test_phase3.py` 保留。
 
@@ -272,6 +272,6 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 
 ## 8. 下一階段
 
-Phase 4 落地見 [`Phase4.md`](./Phase4.md)：台北 05:30 後產一份全站共用開盤前 brief；美股失敗重試、不略過；持股仍不進排程。
+Phase 4 落地見 [`Phase4.md`](./Phase4.md)：台北 05:30 後產一份全站共用開盤前 brief；美股失敗重試、不略過；持股仍不進排程。A2A 協定見 [`Phase5.md`](./Phase5.md)。
 
 面試可以講：一句話處理持股；audit 看得到第一輪 `issue_codes` 與 Validator 打回；chat 角色寄不出信；關掉 send 權限時只留草稿。數字仍由 harness 算、gate 擋住。這是 in-process 權限與審計，不是 A2A。現場不必重跑 holdings 或 replay。
