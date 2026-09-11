@@ -252,6 +252,7 @@ agent/
   llm.py          # Phase 4 adapter
   schedule.py     # Phase 4：05:30 共用盤前 brief
   a2a_server.py   # Phase 5：一個 A2A server
+  a2a_inspector.py  # 官方 Inspector 啟動器（clone 在 .cache）
 ```
 
 `main.py` 加子命令：`mcp`、`agent`、`schedule`、`a2a`。  

@@ -1227,9 +1227,10 @@ def create_app() -> FastAPI:
                         "facts": facts,
                         "markdown": markdown,
                         "has_report": md_file.exists(),
+                        "shared": True,
                     }
                 )
-        return {"items": items[:30]}
+        return {"items": items[:30], "shared": True}
 
     @app.get("/market-weekly/jobs/{job_id}")
     def get_market_weekly_job(job_id: str) -> dict[str, Any]:

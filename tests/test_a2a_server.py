@@ -137,6 +137,27 @@ class A2ACliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("a2a", buffer.getvalue())
         self.assertIn("a2a_server.py", buffer.getvalue())
+        self.assertIn("a2a-inspector", buffer.getvalue())
+
+    def test_a2a_inspector_howto(self) -> None:
+        from agent.a2a_inspector import main as inspector_main
+
+        buffer = io.StringIO()
+        with patch.object(sys, "stdout", buffer):
+            code = inspector_main(["--howto"])
+        self.assertEqual(code, 0)
+        output = buffer.getvalue()
+        self.assertIn("127.0.0.1:5001", output)
+        self.assertIn("http://127.0.0.1:9999", output)
+        self.assertIn("2330 要不要動", output)
+
+    def test_main_py_routes_a2a_inspector_howto(self) -> None:
+        buffer = io.StringIO()
+        with patch.object(sys, "stdout", buffer):
+            code = cli_main(["a2a-inspector", "--howto"])
+        self.assertEqual(code, 0)
+        self.assertIn("a2a-inspector", buffer.getvalue())
+        self.assertIn("9999", buffer.getvalue())
 
 
 class A2AHttpTests(unittest.TestCase):

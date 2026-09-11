@@ -61,6 +61,7 @@ uv run --extra stock --extra ui python main.py schedule --once
 uv run --extra ui --extra stock python main.py market-weekly
 uv run --extra ui --extra stock python main.py market-weekly -- --week-end 2026-07-31
 uv run --extra ui --extra stock python main.py market-weekly -- --resolve-only
+# crontab：30 17 * * 5  … scripts/run_market_weekly.sh
 
 # 日報 grounded chat（讀既有 facts，不重跑 gate）
 uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎麼做？" --dry-run --json
@@ -123,6 +124,12 @@ uv run --extra a2a --extra stock --extra ui python main.py a2a --dry-run --date 
 
 Card：`http://127.0.0.1:9999/.well-known/agent-card.json`。JSON-RPC：`POST http://127.0.0.1:9999/`（method `SendMessage`，建議 header `A2A-Version: 1.0`）。
 
+要像 MCP Inspector 那樣有畫面：另開 `python main.py a2a-inspector`，Connect 填 `http://127.0.0.1:9999`。步驟見 [`a2a-inspector.md`](./a2a-inspector.md)。
+
+```bash
+uv run --extra a2a python main.py a2a-inspector --howto
+```
+
 ---
 
 ## Orchestrator（一句話意圖，Phase 2–3）
@@ -162,7 +169,8 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 ```bash
 uv run --extra stock --extra ui python main.py schedule --once --dry-run
 uv run --extra stock --extra ui python main.py schedule --once
-# crontab：30 5 * * *  … schedule --once
+# crontab：30 5 * * 2-6  … schedule --once
+# crontab：30 17 * * 5    … market-weekly
 ```
 
 敘事引擎：`LLM_BACKEND=agy`（預設）或 `ollama`。

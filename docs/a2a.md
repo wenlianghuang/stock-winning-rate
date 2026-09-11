@@ -69,4 +69,4 @@ python main.py mcp   python main.py a2a
 2. **A2A 有協定實作，一個 server。** Card 在 well-known；client 丟一句話，task 走完後 artifact 是 orchestrator 的 plan／結果。無持倉不跑 position，寄信仍 blocked。
 3. **Phase 2／3 不要冒充 A2A。** 那是編排與權限。A2A 是「別的 Agent runtime 怎麼發現並委派給我們」。
 
-現場主線仍然是 MCP 2330 → facts／gate → 05:30 brief，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。A2A 用 `--print-card` 或 `--dry-run` 十秒帶過即可，不要真跑 agy 當第二條 live 產報。
+現場主線仍然是 MCP 2330 → facts／gate → 05:30 brief，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。A2A 本機畫面用 [`a2a-inspector.md`](./a2a-inspector.md)（Cursor 不是 A2A client）。不要真跑持股當第二條 live 產報。

@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Local clones (A2A Inspector, etc.)
+.cache/
+
 # Generated reports
 reports/
 

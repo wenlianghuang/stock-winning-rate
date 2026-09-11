@@ -24,7 +24,7 @@ uv sync --extra ui --extra stock
 ## Command
 
 ```bash
-# 依最新交易日 CSV 產報（最多 5 輪 agy）
+# 依最新交易日 CSV 產報（最多 8 輪 agy）
 python3 .agents/skills/report-gate/report_gate.py 2409
 
 # 指定日期

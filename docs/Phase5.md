@@ -144,7 +144,13 @@ curl -s http://127.0.0.1:9999/ \
   -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"2330 要不要動"}]}}}'
 ```
 
-a2a-inspector：把 Agent URL 指到 `http://127.0.0.1:9999`。Studio：Add A2A agent，填 Card URL。
+畫面（另開 terminal；A2A server 保持開著）：
+
+```bash
+uv run --extra a2a python main.py a2a-inspector
+```
+
+瀏覽器 `http://127.0.0.1:5001`，Connect 填 `http://127.0.0.1:9999`。步驟見 [`a2a-inspector.md`](./a2a-inspector.md)。Studio：Add A2A agent，填 Card URL。
 
 ---
 
@@ -153,8 +159,9 @@ a2a-inspector：把 Agent URL 指到 `http://127.0.0.1:9999`。Studio：Add A2A 
 新增：
 
 - `agent/a2a_server.py`
+- `agent/a2a_inspector.py`
 - `tests/test_a2a_server.py`
-- `docs/Phase5.md`
+- `docs/Phase5.md`、`docs/a2a-inspector.md`
 
 修改：
 
@@ -180,6 +187,6 @@ a2a-inspector：把 Agent URL 指到 `http://127.0.0.1:9999`。Studio：Add A2A 
 
 ## 7. 現場 demo
 
-**不要**用本階段取代 MCP 2330 主線。A2A 現場十秒：`--print-card` 指 Card 的 `skills` 與 `supportedInterfaces`，或 `--dry-run` server + curl 一句「2330 要不要動」看 task completed、plan 沒有 position。
+**不要**用本階段取代 MCP 2330 主線。A2A 現場：`--print-card`，或 Inspector 丟「2330 要不要動」（見 [`a2a-inspector.md`](./a2a-inspector.md)）。不要真跑持股當第二條 live 產報。
 
 接著仍指 facts／gate 產物與 05:30 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。
