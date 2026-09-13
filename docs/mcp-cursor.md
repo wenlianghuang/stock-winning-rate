@@ -49,8 +49,8 @@ Cursor 這條**不要**自己在 terminal 跑 `python main.py mcp`，也不要�
 
 ### 2.2 確認已連上
 
-1. **Cursor Settings → MCP**（或 Tools & MCP）
-2. `stock-winning-rate` 開關打開、狀態綠
+1. **Cursor Settings → MCP**（或 Tools & MCP
+2. `stock-winning-rate` 開關打開、狀態綠，注意workspace是哪一個
 3. 展開應有 10 個 tools（`fetch_chips`、`run_report_gate`、…）
 
 紅燈：Reload Window；查 MCP log 是 `uv` PATH 還是 `cwd` 錯。
