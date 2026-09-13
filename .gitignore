@@ -21,4 +21,5 @@ reports/
 # Cursor
 .cursor/
 
-docs/*.html
+docs/pitch*
+docs/architecture*
