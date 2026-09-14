@@ -4,7 +4,7 @@
 
 網站（`stock-report-site`）當導入層，STT（`AI_Speech/stt`）當語音 tool。本文件只規劃 `stock-winning-rate` 本體；相鄰 repo 的接點寫在最後一節。
 
-命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。
+命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。A2A 為什麼不能沒有 orchestrator，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
 
 ---
 

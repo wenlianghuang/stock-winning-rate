@@ -1,6 +1,6 @@
 # A2A Inspector：連本機 Agent2Agent server
 
-協定與 Card 見 [`Phase5.md`](./Phase5.md)。用語見 [`a2a.md`](./a2a.md)。本文件記錄：Inspector 跟 Cursor MCP 差在哪、兩個 terminal 怎麼開、Connect URL 填什麼。
+協定與 Card 見 [`Phase5.md`](./Phase5.md)。用語見 [`a2a.md`](./a2a.md)。Chat 一句話為什麼由 orchestrator 排 plan、而不是 Inspector 點 tool，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。本文件記錄：Inspector 跟 Cursor MCP 差在哪、兩個 terminal 怎麼開、Connect URL 填什麼。
 
 狀態：**操作說明已落地**（`python main.py a2a-inspector`）。Inspector 本體是官方 repo 的 clone，不進本 git 樹。
 

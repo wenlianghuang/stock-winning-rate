@@ -114,7 +114,7 @@ uv run --extra mcp --extra stock --extra ui python main.py mcp --list-tools
 
 ## Agent2Agent（給另一個 Agent，Phase 5）
 
-細節見 [`Phase5.md`](./Phase5.md)。用語對照見 [`a2a.md`](./a2a.md)。這是獨立 HTTP process：Card + JSON-RPC task，被叫到仍走 orchestrator／`agent.tools`。不是把 Phase 2／3 的角色拆成多個 server。預設埠 `9999`。演示用 `--dry-run`，避免一接上就跑 agy。
+細節見 [`Phase5.md`](./Phase5.md)。用語對照見 [`a2a.md`](./a2a.md)。為什麼必須走 orchestrator，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。這是獨立 HTTP process：Card + JSON-RPC task，被叫到仍走 orchestrator／`agent.tools`。不是把 Phase 2／3 的角色拆成多個 server。預設埠 `9999`。演示用 `--dry-run`，避免一接上就跑 agy。
 
 ```bash
 uv run --extra a2a --extra stock --extra ui python main.py a2a --print-card

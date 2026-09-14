@@ -1,6 +1,6 @@
 # Phase 5 — Agent2Agent（A2A）server
 
-規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。用語對照見 [`a2a.md`](./a2a.md)。日常產報仍見 [`commands.md`](./commands.md)。本文件記錄：為什麼要 A2A、Card／JSON-RPC 接在哪、以及怎麼驗證「另一個 Agent 能發現我們並委派任務」。
+規劃見 [`agent-roadmap.md`](./agent-roadmap.md) §4。用語對照見 [`a2a.md`](./a2a.md)。日常產報仍見 [`commands.md`](./commands.md)。本文件記錄：為什麼要 A2A、Card／JSON-RPC 接在哪、以及怎麼驗證「另一個 Agent 能發現我們並委派任務」。為什麼這個 server **必須**包 `run_agent`、沒有 orchestrator 會變成什麼，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
 
 狀態：**已落地**（`python main.py a2a` + Agent Card／JSON-RPC 測試）。
 

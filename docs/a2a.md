@@ -1,6 +1,6 @@
 # MCP 與 Agent2Agent（A2A）
 
-職缺常把「LLM、MCP、A2A」並列。這三個不是同義詞。本文件是用語來源；Phase 2／3 **仍然不是** A2A。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。
+職缺常把「LLM、MCP、A2A」並列。這三個不是同義詞。本文件是用語來源；Phase 2／3 **仍然不是** A2A。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。為什麼 A2A 入口**必須**接 orchestrator（沒有會變成空殼／寫死 script／誤用成 MCP），見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
 
 ---
 
@@ -35,7 +35,7 @@
 | Phase 3 | 同一 process：步驟貼 `actor`、角色 allowlist、JSONL audit | 否。交接是 log／CLI 標籤 |
 | Phase 5 | 獨立 HTTP process：Card + JSON-RPC + task，被叫到仍進 `run_agent` | **是。** 協定適配層 |
 
-舊版 roadmap 曾把 in-process 角色叫做 A2A。那是用詞錯誤，已改掉。Phase 5 才是協定。
+舊版 roadmap 曾把 in-process 角色叫做 A2A。那是用詞錯誤，已改掉。Phase 5 才是協定。反過來說：有 Card 沒有 `run_agent`，也不算「可被委派的 Agent」，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
 
 懂協定的人若問 Agent Card、task、認證：指 `python main.py a2a --print-card` 與 `tests/test_a2a_server.py`。面試講 Phase 2／3 時仍用 orchestrator、allowlist、human gate、audit。
 

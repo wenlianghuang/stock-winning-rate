@@ -18,7 +18,7 @@ LLM 在這一層 **只允許** 填 plan JSON（可選 `--plan-json`）。預設 
 
 不重寫 gate。`max_rounds` 仍交給既有 `report-gate`／`position-gate`；Orchestrator 只在 CSV 缺失（exit 20）時插入一次 `fetch_chips` 再重試。
 
-本階段也**不是** A2A：沒有第二個 Agent、沒有 Agent Card、沒有跨 process 委派。預設還是規則分類 + 同一組 tools。見 [`a2a.md`](./a2a.md)。
+本階段也**不是** A2A：沒有第二個 Agent、沒有 Agent Card、沒有跨 process 委派。預設還是規則分類 + 同一組 tools。見 [`a2a.md`](./a2a.md)。Phase 5 的 A2A server 被叫到時走的就是這一層；沒有它，Card 只是空房間，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
 
 ---
 
