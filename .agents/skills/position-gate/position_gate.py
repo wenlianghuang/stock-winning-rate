@@ -692,7 +692,7 @@ def run_gate(
                 exit_code=agy_exit,
             )
             md_path, pdf_path = write_position_artifacts(
-                csv_path, body, meta, holding_info
+                csv_path, body, meta, holding_info, skip_pdf=skip_pdf
             )
             _ensure_import_paths()
             from report_summary import merge_position_summary

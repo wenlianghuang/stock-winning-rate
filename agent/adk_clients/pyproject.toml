@@ -1,0 +1,11 @@
+[project]
+name = "stock-a2a-adk-client"
+version = "0.1.0"
+description = "Google ADK client that discovers stock-winning-rate via Agent Card and delegates over A2A."
+requires-python = ">=3.13"
+dependencies = [
+    "google-adk[a2a]>=2.5,<3",
+]
+
+[tool.uv]
+package = false

@@ -253,6 +253,8 @@ agent/
   schedule.py     # Phase 4：05:30 共用盤前 brief
   a2a_server.py   # Phase 5：一個 A2A server
   a2a_inspector.py  # 官方 Inspector 啟動器（clone 在 .cache）
+  a2a_adk.py      # Google ADK peer client 啟動器
+  adk_clients/    # 獨立 uv 專案（google-adk），不進本 repo extra
 ```
 
 `main.py` 加子命令：`mcp`、`agent`、`schedule`、`a2a`。  

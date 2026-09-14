@@ -1,0 +1,7 @@
+{
+  "2409": {
+    "avg_cost": 32.5,
+    "shares": 500000,
+    "note": "fixture: 2330 不在持股，給 skip-position 測試用"
+  }
+}

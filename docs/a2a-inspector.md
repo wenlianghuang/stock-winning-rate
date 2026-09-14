@@ -12,7 +12,7 @@
 |--|-----|-----|
 | Server | `python main.py mcp` | `python main.py a2a`（HTTP `:9999`） |
 | Debug UI | `npx @modelcontextprotocol/inspector` | `python main.py a2a-inspector`（官方 [a2a-inspector](https://github.com/a2aproject/a2a-inspector)，本機 `:5001`） |
-| 日常 Agent client | **Cursor**（`.cursor/mcp.json`） | **沒有。** Cursor 不講 A2A |
+| 日常 Agent client | **Cursor**（`.cursor/mcp.json`） | 沒有 Cursor。本機 peer 用 Google ADK（[`a2a-adk.md`](./a2a-adk.md)）；Studio 要帳號 |
 | 人在 UI 做什麼 | 點 tool、填 `stocks: ["2330"]` | Chat 丟一句「2330 要不要動」；plan 由 orchestrator 排 |
 
 Inspector 頁是除錯／演示 client，不是 `stock-report-site`。網站仍走 FastAPI。
@@ -79,4 +79,4 @@ Debug console 應看到 JSON-RPC `SendMessage`。那才是協定往返；Cursor 
 | Docker 跑 Inspector 填 `127.0.0.1:9999` | Inspector **後端**去打 Agent。容器裡的 127.0.0.1 不是你的 Mac。本 launcher 走本機 clone，避免這題 |
 | 一接上就跑很久 | 沒加 `--dry-run` 會真跑 agy；先 2330 |
 
-Studio「Add A2A agent」是另一條（公開 HTTPS + OAuth），見 [`Phase5.md`](./Phase5.md)。本機演示用 Inspector 即可。
+Studio「Add A2A agent」是另一條（公開 HTTPS + OAuth），見 [`Phase5.md`](./Phase5.md)。本機演示用 Inspector 即可。沒有 Studio 帳號、要練「另一個 Agent 委派」時用 [`a2a-adk.md`](./a2a-adk.md)。

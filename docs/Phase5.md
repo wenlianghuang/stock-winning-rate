@@ -28,7 +28,7 @@ Phase 0 收成 `agent.tools`。Phase 1 用 MCP 給「會自己選 tool 的 clien
 ## 2. 目標架構
 
 ```
-Copilot Studio / a2a-inspector / curl
+Copilot Studio / a2a-inspector / Google ADK / curl
         │  GET /.well-known/agent-card.json
         │  POST /   JSON-RPC SendMessage
         ▼
@@ -58,7 +58,7 @@ python main.py a2a
 | `stock_research` | 2330 要不要動 | 四碼代號會補成「要不要動」 |
 | `market_outlook` | 明天開盤怎麼看 | 原句或 skill 預設句 |
 
-`StockAgentExecutor` 實作 A2A 1.0 的 **task lifecycle**（先 enqueue `Task`，再 working／artifact／completed）。訊息文字交給 `handle_intent` → `run_agent`。預設 `approve_send=False`，policy 不會寄信。
+`StockAgentExecutor` 實作 A2A 1.0 的 **task lifecycle**（先 enqueue `Task`，再 working／artifact／completed）。訊息文字交給 `handle_intent` → `run_agent`。預設 `approve_send=False`，policy 不會寄信。回傳 artifact 會先列 `report_files`（`md_path`／是否 skip PDF），JSON 不塞整篇 markdown。A2A 預設 `skip_pdf=True`，report-gate／position-gate **不會寫 PDF**（只寫 `.md`）。
 
 `--dry-run` 只編成 plan，給 inspector 演示，避免一接上就跑 agy。
 
@@ -93,7 +93,8 @@ python main.py a2a
 
 - Card 含 JSONRPC interface 與三個 skill
 - `GET /.well-known/agent-card.json`
-- `SendMessage`「2330 要不要動」→ 有 `run_report_gate`、無 `run_position_gate`
+- `SendMessage`「2330 要不要動」→ 有 `run_report_gate`、無 `run_position_gate`（測試用固定 holdings fixture，不讀現場 `holdings.json`）
+- 有 `md_path` 時 artifact 先列「產物:」路徑；JSON `files[]` 不含整篇 markdown
 - 「幫我處理今天持股」→ 有 position／draft、無 `send_digest`、digest pending
 - 空訊息 → `TASK_STATE_REJECTED`
 - Bearer 擋 RPC、不擋 Card
@@ -150,7 +151,16 @@ curl -s http://127.0.0.1:9999/ \
 uv run --extra a2a python main.py a2a-inspector
 ```
 
-瀏覽器 `http://127.0.0.1:5001`，Connect 填 `http://127.0.0.1:9999`。步驟見 [`a2a-inspector.md`](./a2a-inspector.md)。Studio：Add A2A agent，填 Card URL。
+瀏覽器 `http://127.0.0.1:5001`，Connect 填 `http://127.0.0.1:9999`。步驟見 [`a2a-inspector.md`](./a2a-inspector.md)。
+
+沒有 Copilot Studio 時，用 Google ADK 當 peer client（Gemini key 自己設）：
+
+```bash
+uv run --extra a2a python main.py a2a-adk --howto
+uv run --extra a2a python main.py a2a-adk
+```
+
+瀏覽器 `http://127.0.0.1:8002`。步驟見 [`a2a-adk.md`](./a2a-adk.md)。Studio：Add A2A agent，填 Card URL。
 
 ---
 
@@ -160,8 +170,9 @@ uv run --extra a2a python main.py a2a-inspector
 
 - `agent/a2a_server.py`
 - `agent/a2a_inspector.py`
-- `tests/test_a2a_server.py`
-- `docs/Phase5.md`、`docs/a2a-inspector.md`
+- `agent/a2a_adk.py`、`agent/adk_clients/`（獨立 uv：Google ADK peer client）
+- `tests/test_a2a_server.py`、`tests/test_a2a_adk.py`
+- `docs/Phase5.md`、`docs/a2a-inspector.md`、`docs/a2a-adk.md`
 
 修改：
 
@@ -169,7 +180,7 @@ uv run --extra a2a python main.py a2a-inspector
 - `main.py` — `a2a` 子命令
 - `docs/a2a.md`、`docs/commands.md`、`docs/agent-roadmap.md`
 
-沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。沒有把內部角色拆成多個 A2A server。
+沒有改 gate 驗證規則、報告模板、MCP tool 清單、FastAPI JSON、網站 repo。沒有接券商 API。沒有把內部角色拆成多個 A2A server。`skip_pdf` 現在真的不寫 PDF（以前只是不印路徑）。
 
 ---
 
@@ -187,6 +198,6 @@ uv run --extra a2a python main.py a2a-inspector
 
 ## 7. 現場 demo
 
-**不要**用本階段取代 MCP 2330 主線。A2A 現場：`--print-card`，或 Inspector 丟「2330 要不要動」（見 [`a2a-inspector.md`](./a2a-inspector.md)）。不要真跑持股當第二條 live 產報。
+**不要**用本階段取代 MCP 2330 主線。A2A 現場：`--print-card`，或 Inspector 丟「2330 要不要動」（見 [`a2a-inspector.md`](./a2a-inspector.md)）。本機確認「另一個 Agent 委派」用 ADK（見 [`a2a-adk.md`](./a2a-adk.md)）。不要真跑持股當第二條 live 產報。
 
 接著仍指 facts／gate 產物與 05:30 brief。見 [`agent-roadmap.md`](./agent-roadmap.md) §8、[`a2a.md`](./a2a.md)。

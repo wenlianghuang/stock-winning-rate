@@ -549,7 +549,9 @@ def run_gate(
                 job_id=f"gate-{csv_path.stem}-r{round_no}",
                 exit_code=agy_exit,
             )
-            md_path, pdf_path = write_summary_artifacts(csv_path, body, meta)
+            md_path, pdf_path = write_summary_artifacts(
+                csv_path, body, meta, skip_pdf=skip_pdf
+            )
             _ensure_import_paths()
             from chip_tables import load_history_rows
             from report_summary import write_market_summary

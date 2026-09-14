@@ -60,6 +60,7 @@ class PositionGateResult(ToolResult):
     trade_date: str | None = None
     csv_path: str | None = None
     md_path: str | None = None
+    pdf_path: str | None = None
 
 
 def get_holdings(inp: HoldingsInput | None = None, **overrides: Any) -> HoldingsResult:
@@ -188,6 +189,7 @@ def run_position_gate(
         )
 
     md_path = csv_path.with_name(f"{csv_path.stem}_position.md")
+    pdf_path = csv_path.with_name(f"{csv_path.stem}_position.pdf")
     return PositionGateResult(
         ok=code == EXIT_OK,
         exit_code=code,
@@ -196,4 +198,7 @@ def run_position_gate(
         trade_date=params.trade_date or csv_path.parent.name,
         csv_path=str(csv_path),
         md_path=str(md_path) if md_path.exists() else None,
+        pdf_path=None
+        if params.skip_pdf
+        else (str(pdf_path) if pdf_path.exists() else None),
     )

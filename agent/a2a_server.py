@@ -1,6 +1,6 @@
 """Phase 5 A2A server: one Agent Card wrapping the existing orchestrator.
 
-CLI: ``python main.py a2a``. Copilot Studio / a2a-inspector discover
+CLI: ``python main.py a2a``. Copilot Studio / a2a-inspector / Google ADK discover
 ``/.well-known/agent-card.json`` and POST JSON-RPC to this process.
 Domain logic stays in ``agent.tools`` / ``run_agent``; this module is the
 Agent2Agent adapter, not a second chip/gate implementation.
@@ -41,9 +41,12 @@ from agent.orchestrator import (
     STOCK_RE,
     AgentContext,
     AgentRun,
+    collect_run_files,
+    format_files_section,
     format_run,
     run_agent,
     run_to_dict,
+    slim_run_dict,
 )
 from agent.tools._types import EXIT_BAD_ARGS, EXIT_OK
 
@@ -193,7 +196,12 @@ def resolve_intent(text: str, skill: str | None = None) -> str:
 
 
 def _jsonable(run: AgentRun) -> dict[str, Any]:
-    return json.loads(json.dumps(run_to_dict(run), ensure_ascii=False, default=str))
+    payload = json.loads(json.dumps(run_to_dict(run), ensure_ascii=False, default=str))
+    return slim_run_dict(payload)
+
+
+def format_report_files(run: AgentRun) -> str:
+    return "\n".join(format_files_section(collect_run_files(run)))
 
 
 def handle_intent(
@@ -314,6 +322,14 @@ class StockAgentExecutor(AgentExecutor):
 
         summary = format_run(run)
         payload = _jsonable(run)
+        await event_queue.enqueue_event(
+            new_text_artifact_update_event(
+                task.id,
+                task.context_id,
+                name="report_files",
+                text=format_report_files(run),
+            )
+        )
         await event_queue.enqueue_event(
             new_text_artifact_update_event(
                 task.id,

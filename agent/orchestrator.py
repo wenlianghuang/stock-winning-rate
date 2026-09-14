@@ -890,6 +890,14 @@ def _mark_research_artifact(
     artifacts.setdefault(stock_id, {})
     artifacts[stock_id]["trade_date"] = outcome.result.get("trade_date") or trade_date
     artifacts[stock_id]["passed"] = bool(outcome.ok)
+    md_path = outcome.result.get("md_path")
+    if md_path:
+        artifacts[stock_id]["md_path"] = md_path
+    pdf_path = outcome.result.get("pdf_path")
+    if pdf_path:
+        artifacts[stock_id]["pdf_path"] = pdf_path
+    else:
+        artifacts[stock_id].pop("pdf_path", None)
     if notify_may_include(report_passed=outcome.ok):
         markdown = _read_text(outcome.result.get("md_path"))
         if not markdown:
@@ -1157,10 +1165,14 @@ def run_agent(
         if outcome.tool == "run_position_gate" and outcome.ok:
             stock_id = str(outcome.args.get("stock_id") or "")
             artifacts.setdefault(stock_id, {})
+            pos_md = outcome.result.get("md_path")
+            if pos_md:
+                artifacts[stock_id]["position_md_path"] = pos_md
+            pos_pdf = outcome.result.get("pdf_path")
+            if pos_pdf:
+                artifacts[stock_id]["position_pdf_path"] = pos_pdf
             if artifacts.get(stock_id, {}).get("passed"):
-                artifacts[stock_id]["position_markdown"] = _read_text(
-                    outcome.result.get("md_path")
-                )
+                artifacts[stock_id]["position_markdown"] = _read_text(pos_md)
 
         if should_retry_after_csv_missing(outcome.tool, outcome.exit_code) and not outcome.skipped:
             stock_id = str(outcome.args.get("stock_id") or "")
@@ -1308,7 +1320,79 @@ def format_run(run: AgentRun) -> str:
         lines.append(f"草稿主旨: {run.digest_subject}")
     if run.audit_path:
         lines.append(f"Audit: {run.audit_path}")
+    lines.append("")
+    lines.extend(format_files_section(collect_run_files(run)))
     return "\n".join(lines)
+
+
+FILE_RESULT_KEYS = ("md_path", "pdf_path", "csv_path", "facts_path")
+BULKY_RESULT_KEYS = ("markdown", "position_markdown", "body", "prompt")
+
+
+def collect_run_files(run: AgentRun) -> list[dict[str, Any]]:
+    """Short path list from executed gate/tool results (no report bodies)."""
+    files: list[dict[str, Any]] = []
+    for step in run.steps:
+        if step.skipped or step.superseded:
+            continue
+        result = step.result or {}
+        paths = {key: result[key] for key in FILE_RESULT_KEYS if result.get(key)}
+        if not paths:
+            continue
+        stock_id = result.get("stock_id") or step.args.get("stock_id")
+        entry: dict[str, Any] = {"tool": step.tool, **paths}
+        if stock_id:
+            entry["stock_id"] = str(stock_id)
+        if step.args.get("skip_pdf") and not paths.get("pdf_path"):
+            entry["pdf_skipped"] = True
+        files.append(entry)
+    return files
+
+
+def format_files_section(files: list[dict[str, Any]]) -> list[str]:
+    if not files:
+        return ["產物: （本輪沒有寫出 md／pdf 路徑）"]
+    lines = ["產物:"]
+    for item in files:
+        stock = str(item.get("stock_id") or "")
+        indent = f"  - {stock} " if stock else "  - "
+        if item.get("md_path"):
+            lines.append(f"{indent}md: {item['md_path']}")
+            indent = "    "
+        if item.get("pdf_path"):
+            lines.append(f"{indent}pdf: {item['pdf_path']}")
+        elif item.get("pdf_skipped"):
+            lines.append(f"{indent}pdf: 本輪 skip_pdf，未寫 PDF（Markdown 仍是磁碟上的實體檔）")
+        if item.get("csv_path") and not item.get("md_path"):
+            lines.append(f"{indent}csv: {item['csv_path']}")
+        if item.get("facts_path") and not item.get("md_path"):
+            lines.append(f"{indent}facts: {item['facts_path']}")
+    return lines
+
+
+def slim_run_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop report bodies from JSON so A2A/ADK clients see paths, not full markdown."""
+    slim = dict(payload)
+    slim["steps"] = [_slim_step_dict(step) for step in payload.get("steps") or []]
+    slim["probes"] = [_slim_step_dict(step) for step in payload.get("probes") or []]
+    return slim
+
+
+def _slim_step_dict(step: dict[str, Any]) -> dict[str, Any]:
+    cloned = dict(step)
+    result = dict(cloned.get("result") or {})
+    for key in BULKY_RESULT_KEYS:
+        result.pop(key, None)
+    cloned["result"] = result
+    args = dict(cloned.get("args") or {})
+    items = args.get("items")
+    if isinstance(items, list):
+        args["items"] = [
+            {"stock_id": item.get("stock_id")} if isinstance(item, dict) else item
+            for item in items
+        ]
+    cloned["args"] = args
+    return cloned
 
 
 def _short_args(args: dict[str, Any]) -> str:
@@ -1342,14 +1426,15 @@ def run_to_dict(run: AgentRun) -> dict[str, Any]:
         "intent": run.intent,
         "intent_kind": run.intent_kind,
         "trade_date": run.trade_date,
+        "ok": run.ok,
+        "exit_code": run.exit_code,
+        "files": collect_run_files(run),
         "plan": plan_to_dict(run.plan),
         "probes": [asdict(step) for step in run.probes],
         "steps": [asdict(step) for step in run.steps],
         "notes": run.notes,
         "digest_status": run.digest_status,
         "digest_subject": run.digest_subject,
-        "ok": run.ok,
-        "exit_code": run.exit_code,
         "budget_calls": run.budget_calls,
         "budget_max": run.budget_max,
         "dry_run": run.dry_run,

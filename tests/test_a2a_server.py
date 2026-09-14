@@ -27,12 +27,15 @@ from agent.a2a_server import (  # noqa: E402
     main as a2a_main,
     resolve_intent,
 )
+from agent.orchestrator import AgentRun, Plan, PlanStep, StepResult  # noqa: E402
 from agent.policy import (  # noqa: E402
     DIGEST_PENDING,
     INTENT_MARKET_OUTLOOK,
     INTENT_PROCESS_HOLDINGS,
     INTENT_STOCK_DECISION,
 )
+from agent.tools._types import EXIT_OK  # noqa: E402
+from agent.tools.position import HoldingsResult  # noqa: E402
 from main import main as cli_main  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
@@ -74,6 +77,16 @@ def _plan_tools(task: dict) -> list[str]:
             if isinstance(data, dict) and "plan" in data:
                 return [step.get("tool") for step in data["plan"].get("steps") or []]
     return []
+
+
+def _artifact_data(task: dict) -> list[dict]:
+    blobs: list[dict] = []
+    for artifact in task.get("artifacts") or []:
+        for part in artifact.get("parts") or []:
+            data = part.get("data")
+            if isinstance(data, dict):
+                blobs.append(data)
+    return blobs
 
 
 def _artifact_text(task: dict) -> str:
@@ -138,6 +151,7 @@ class A2ACliTests(unittest.TestCase):
         self.assertIn("a2a", buffer.getvalue())
         self.assertIn("a2a_server.py", buffer.getvalue())
         self.assertIn("a2a-inspector", buffer.getvalue())
+        self.assertIn("a2a-adk", buffer.getvalue())
 
     def test_a2a_inspector_howto(self) -> None:
         from agent.a2a_inspector import main as inspector_main
@@ -162,6 +176,16 @@ class A2ACliTests(unittest.TestCase):
 
 class A2AHttpTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.holdings_patcher = patch(
+            "agent.tools.position.get_holdings",
+            return_value=HoldingsResult(
+                ok=True,
+                exit_code=EXIT_OK,
+                holdings={"2409": {"avg_cost": 32.5, "shares": 500000}},
+            ),
+        )
+        self.holdings_patcher.start()
+        self.addCleanup(self.holdings_patcher.stop)
         self.app = build_app(dry_run=True, trade_date="2026-08-18")
         self.client = TestClient(self.app)
 
@@ -242,6 +266,71 @@ class A2AHttpTests(unittest.TestCase):
         self.assertNotIn("error", response.json())
         task = _task_from_rpc(response.json())
         self.assertEqual((task.get("status") or {}).get("state"), "TASK_STATE_COMPLETED")
+
+    def test_send_message_lists_report_file_paths(self) -> None:
+        md = "/tmp/reports/stock/2026-09-11/tw_stock_2308.md"
+
+        def fake_run(intent, context=None, **_kwargs):
+            return AgentRun(
+                intent=intent,
+                intent_kind=INTENT_STOCK_DECISION,
+                trade_date="2026-09-11",
+                plan=Plan(
+                    intent=intent,
+                    intent_kind=INTENT_STOCK_DECISION,
+                    trade_date="2026-09-11",
+                    steps=[
+                        PlanStep(
+                            tool="run_report_gate",
+                            args={"stock_id": "2308", "skip_pdf": True},
+                            reason="research",
+                        )
+                    ],
+                    notes=["2308 無持倉，不跑 position"],
+                ),
+                steps=[
+                    StepResult(
+                        tool="run_report_gate",
+                        args={"stock_id": "2308", "skip_pdf": True},
+                        ok=True,
+                        exit_code=0,
+                        gate_passed=True,
+                        summary=f"gate 通過 {md}",
+                        result={
+                            "stock_id": "2308",
+                            "md_path": md,
+                            "markdown": "# 不該出現在 A2A JSON 的正文",
+                        },
+                    )
+                ],
+                notes=["2308 無持倉，不跑 position"],
+                ok=True,
+                exit_code=0,
+            )
+
+        app = build_app(trade_date="2026-09-11", run_agent_fn=fake_run)
+        client = TestClient(app)
+        response = client.post(
+            "/",
+            json=_send_message_body("2308的今天狀況如何?"),
+            headers=A2A_HEADERS,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        task = _task_from_rpc(response.json())
+        self.assertEqual((task.get("status") or {}).get("state"), "TASK_STATE_COMPLETED")
+        text = _artifact_text(task)
+        self.assertIn("產物:", text)
+        self.assertIn(md, text)
+        self.assertIn("skip_pdf", text)
+        self.assertNotIn("不該出現在 A2A JSON 的正文", text)
+        blobs = _artifact_data(task)
+        self.assertTrue(blobs)
+        files = blobs[0].get("files") or []
+        self.assertEqual(files[0]["md_path"], md)
+        self.assertTrue(files[0].get("pdf_skipped"))
+        result = blobs[0]["steps"][0]["result"]
+        self.assertEqual(result["md_path"], md)
+        self.assertNotIn("markdown", result)
 
     def test_empty_message_is_rejected(self) -> None:
         response = self.client.post(

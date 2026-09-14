@@ -126,9 +126,14 @@ Card：`http://127.0.0.1:9999/.well-known/agent-card.json`。JSON-RPC：`POST ht
 
 要像 MCP Inspector 那樣有畫面：另開 `python main.py a2a-inspector`，Connect 填 `http://127.0.0.1:9999`。步驟見 [`a2a-inspector.md`](./a2a-inspector.md)。
 
+沒有 Copilot Studio 時，用 Google ADK 當 peer client（Gemini key 自己放根目錄 `.env` 的 `GOOGLE_API_KEY`）：
+
 ```bash
 uv run --extra a2a python main.py a2a-inspector --howto
+uv run --extra a2a python main.py a2a-adk --howto
 ```
+
+ADK Web：`http://127.0.0.1:8002`。步驟見 [`a2a-adk.md`](./a2a-adk.md)。
 
 ---
 

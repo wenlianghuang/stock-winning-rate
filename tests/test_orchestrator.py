@@ -20,10 +20,13 @@ from agent.orchestrator import (  # noqa: E402
     apply_policy,
     build_plan,
     classify_intent,
+    collect_run_files,
     format_run,
     main as agent_main,
     plan_from_dict,
     run_agent,
+    run_to_dict,
+    slim_run_dict,
 )
 from agent.policy import (  # noqa: E402
     DIGEST_PENDING,
@@ -268,6 +271,15 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
         self.assertNotIn("run_position_gate", tools)
         self.assertTrue(any("2330" in note and "無持倉" in note for note in run.notes))
         self.assertIn("PASS", format_run(run))
+        files = collect_run_files(run)
+        self.assertEqual(files[0]["md_path"], "/tmp/missing.md")
+        self.assertTrue(files[0].get("pdf_skipped"))
+        text = format_run(run)
+        self.assertIn("產物:", text)
+        self.assertIn("/tmp/missing.md", text)
+        self.assertIn("skip_pdf", text)
+        payload = run_to_dict(run)
+        self.assertEqual(payload["files"][0]["md_path"], "/tmp/missing.md")
 
     def test_market_outlook_runs_daily_then_chat(self) -> None:
         calls: list = []
@@ -315,6 +327,32 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
         self.assertEqual(run.exit_code, EXIT_FAILED)
         self.assertEqual(len(calls), 1)
         self.assertTrue(any("budget" in (step.skip_reason or "") for step in run.steps))
+
+    def test_slim_run_dict_keeps_paths_drops_bodies(self) -> None:
+        payload = {
+            "steps": [
+                {
+                    "tool": "run_report_gate",
+                    "args": {"stock_id": "2308", "skip_pdf": True},
+                    "result": {
+                        "md_path": "/tmp/tw_stock_2308.md",
+                        "markdown": "# 整篇報告",
+                    },
+                },
+                {
+                    "tool": "draft_digest",
+                    "args": {
+                        "items": [{"stock_id": "2308", "markdown": "# 又一篇"}],
+                    },
+                    "result": {},
+                },
+            ],
+            "probes": [],
+        }
+        slim = slim_run_dict(payload)
+        self.assertEqual(slim["steps"][0]["result"]["md_path"], "/tmp/tw_stock_2308.md")
+        self.assertNotIn("markdown", slim["steps"][0]["result"])
+        self.assertEqual(slim["steps"][1]["args"]["items"], [{"stock_id": "2308"}])
 
     def test_failed_report_skips_position(self) -> None:
         calls: list = []
@@ -377,7 +415,16 @@ class CliTests(unittest.TestCase):
     def test_dry_run_2330_explains_no_position(self) -> None:
         buffer = io.StringIO()
         with patch.object(sys, "stdout", buffer):
-            code = agent_main(["--dry-run", "--date", "2026-08-18", "2330 要不要動"])
+            code = agent_main(
+                [
+                    "--dry-run",
+                    "--date",
+                    "2026-08-18",
+                    "--holdings",
+                    str(FIXTURE_DIR / "holdings_2409_only.json"),
+                    "2330 要不要動",
+                ]
+            )
         output = buffer.getvalue()
         self.assertEqual(code, 0)
         self.assertIn("stock_decision", output)

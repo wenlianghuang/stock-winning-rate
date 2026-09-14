@@ -40,6 +40,7 @@ class ReportGateResult(ToolResult):
     trade_date: str | None = None
     csv_path: str | None = None
     md_path: str | None = None
+    pdf_path: str | None = None
 
 
 def _catch_agy_exit(exc: BaseException) -> int | None:
@@ -129,6 +130,7 @@ def run_report_gate(
         )
 
     md_path = csv_path.with_suffix(".md")
+    pdf_path = csv_path.with_suffix(".pdf")
     trade_date = params.trade_date or csv_path.parent.name
     return ReportGateResult(
         ok=code == EXIT_OK,
@@ -138,4 +140,7 @@ def run_report_gate(
         trade_date=trade_date,
         csv_path=str(csv_path),
         md_path=str(md_path) if md_path.exists() else None,
+        pdf_path=None
+        if params.skip_pdf
+        else (str(pdf_path) if pdf_path.exists() else None),
     )

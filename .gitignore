@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# ADK local session/artifact store (python main.py a2a-adk)
+.adk/
+
 # Local clones (A2A Inspector, etc.)
 .cache/
 
