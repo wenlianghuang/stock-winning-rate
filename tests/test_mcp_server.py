@@ -60,6 +60,9 @@ class McpServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("CSV", report_desc)
             send_desc = by_name["send_digest"].description or ""
             self.assertIn("approved", send_desc)
+            draft_desc = by_name["draft_digest"].description or ""
+            self.assertIn("digest.md", draft_desc)
+            self.assertIn("md_path", draft_desc)
 
     async def test_fetch_chips_then_report_gate_for_2330(self) -> None:
         fake_fetch = FetchChipsResult(

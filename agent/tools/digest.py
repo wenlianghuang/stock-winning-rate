@@ -3,12 +3,53 @@
 from __future__ import annotations
 
 import json
+import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from agent.tools._types import EXIT_AGY_MISSING, EXIT_FAILED, EXIT_OK, ToolResult
+from agent.tools._paths import ROOT
+from agent.tools._types import (
+    EXIT_AGY_MISSING,
+    EXIT_BAD_ARGS,
+    EXIT_FAILED,
+    EXIT_OK,
+    ToolResult,
+)
 
 AGY_TIMEOUT_SEC = 900
+DIGEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DIGEST_ROOT = ROOT / "reports" / "digest"
+
+
+def digest_md_path(digest_date: str) -> Path:
+    day = (digest_date or "").strip()
+    if not DIGEST_DATE_RE.match(day):
+        raise ValueError("digest_date 須為 YYYY-MM-DD")
+    return DIGEST_ROOT / day / "digest.md"
+
+
+def format_digest_markdown(*, digest_date: str, subject: str, body: str) -> str:
+    return (
+        "# Email 草稿\n\n"
+        f"- **日期：** {digest_date}\n"
+        f"- **主旨：** {subject}\n"
+        f"- **狀態：** pending_approval（本 repo 不寄信）\n\n"
+        "---\n\n"
+        f"{body.rstrip()}\n"
+    )
+
+
+def write_digest_markdown(
+    path: Path, *, digest_date: str, subject: str, body: str
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        format_digest_markdown(digest_date=digest_date, subject=subject, body=body),
+        encoding="utf-8",
+    )
+    return path
 
 
 @dataclass
@@ -30,6 +71,8 @@ class DraftDigestInput:
 class DraftDigestResult(ToolResult):
     subject: str | None = None
     main_detail_markdown: str | None = None
+    digest_date: str | None = None
+    md_path: str | None = None
 
 
 @dataclass
@@ -96,14 +139,24 @@ def draft_digest(inp: DraftDigestInput | None = None, **overrides: Any) -> Draft
             digest_date=str(overrides.get("digest_date", params.digest_date)),
             items=list(items),
         )
-    if not params.digest_date or not params.items:
+    digest_date = str(params.digest_date or "").strip()
+    if not digest_date or not params.items:
         return DraftDigestResult(
             ok=False,
             exit_code=EXIT_FAILED,
             error="draft_digest 需要 digest_date 與至少一筆 items",
         )
     try:
-        prompt = build_digest_prompt(params.digest_date, params.items)
+        md_path = digest_md_path(digest_date)
+    except ValueError as exc:
+        return DraftDigestResult(
+            ok=False,
+            exit_code=EXIT_BAD_ARGS,
+            error=str(exc),
+            digest_date=digest_date,
+        )
+    try:
+        prompt = build_digest_prompt(digest_date, params.items)
         raw = _run_agy(prompt)
         payload = json.loads(raw)
         subject = str(payload.get("subject", "")).strip()
@@ -111,20 +164,47 @@ def draft_digest(inp: DraftDigestInput | None = None, **overrides: Any) -> Draft
         if not subject or not main_detail:
             raise ValueError("digest JSON 缺少 subject 或 main_detail_markdown")
     except FileNotFoundError as exc:
-        return DraftDigestResult(ok=False, exit_code=EXIT_AGY_MISSING, error=str(exc))
+        return DraftDigestResult(
+            ok=False,
+            exit_code=EXIT_AGY_MISSING,
+            error=str(exc),
+            digest_date=digest_date,
+        )
     except json.JSONDecodeError as exc:
         return DraftDigestResult(
             ok=False,
             exit_code=EXIT_FAILED,
             error=f"Digest JSON 解析失敗：{exc}",
+            digest_date=digest_date,
         )
     except Exception as exc:  # noqa: BLE001
-        return DraftDigestResult(ok=False, exit_code=EXIT_FAILED, error=str(exc))
+        return DraftDigestResult(
+            ok=False,
+            exit_code=EXIT_FAILED,
+            error=str(exc),
+            digest_date=digest_date,
+        )
+    try:
+        write_digest_markdown(
+            md_path, digest_date=digest_date, subject=subject, body=main_detail
+        )
+        print(f"Markdown: {md_path.resolve()}", file=sys.stderr)
+    except OSError as exc:
+        return DraftDigestResult(
+            ok=False,
+            exit_code=EXIT_FAILED,
+            error=f"無法寫入 digest 草稿：{exc}",
+            subject=subject,
+            main_detail_markdown=main_detail,
+            digest_date=digest_date,
+        )
     return DraftDigestResult(
         ok=True,
         exit_code=EXIT_OK,
         subject=subject,
         main_detail_markdown=main_detail,
+        digest_date=digest_date,
+        md_path=str(md_path.resolve()),
     )
 
 

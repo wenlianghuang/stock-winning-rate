@@ -177,7 +177,7 @@ uv run --extra stock --extra ui python -m unittest tests.test_orchestrator tests
 uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持股"
 ```
 
-結束時會多 `run_id`、`角色`、`權限: send_digest=off`、Handoffs（實際執行才有 Validator 輪次）、以及 `Audit: reports/agent/{日期}/run_….jsonl`。信不會寄出，`digest=pending_approval`。
+結束時會多 `run_id`、`角色`、`權限: send_digest=off`、Handoffs（實際執行才有 Validator 輪次）、以及 `Audit: reports/agent/{日期}/run_….jsonl`。digest 草稿寫 `reports/digest/{日期}/digest.md`。信不會寄出，`digest=pending_approval`。
 
 只看 plan：
 

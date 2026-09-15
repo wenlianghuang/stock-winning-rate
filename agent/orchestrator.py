@@ -178,6 +178,7 @@ class AgentRun:
     notes: list[str] = field(default_factory=list)
     digest_status: str = DIGEST_NA
     digest_subject: str | None = None
+    digest_md_path: str | None = None
     ok: bool = False
     exit_code: int = EXIT_FAILED
     budget_calls: int = 0
@@ -1212,8 +1213,12 @@ def run_agent(
 
         if outcome.tool == "draft_digest" and outcome.ok:
             run.digest_subject = outcome.result.get("subject")
+            run.digest_md_path = outcome.result.get("md_path")
             run.digest_status = DIGEST_PENDING
-            run.notes.append("digest 草稿已產出，send_digest 權限關閉（待核准，本 repo 不寄信）")
+            path_note = f"（{run.digest_md_path}）" if run.digest_md_path else ""
+            run.notes.append(
+                f"digest 草稿已產出{path_note}，send_digest 權限關閉（待核准，本 repo 不寄信）"
+            )
 
     run.steps = step_results
     run.budget_calls = budget.calls
@@ -1318,6 +1323,8 @@ def format_run(run: AgentRun) -> str:
     )
     if run.digest_subject:
         lines.append(f"草稿主旨: {run.digest_subject}")
+    if run.digest_md_path:
+        lines.append(f"草稿檔: {run.digest_md_path}")
     if run.audit_path:
         lines.append(f"Audit: {run.audit_path}")
     lines.append("")
@@ -1435,6 +1442,7 @@ def run_to_dict(run: AgentRun) -> dict[str, Any]:
         "notes": run.notes,
         "digest_status": run.digest_status,
         "digest_subject": run.digest_subject,
+        "digest_md_path": run.digest_md_path,
         "budget_calls": run.budget_calls,
         "budget_max": run.budget_max,
         "dry_run": run.dry_run,

@@ -1054,6 +1054,7 @@ def create_app() -> FastAPI:
                 "digest": {
                     "subject": result.subject,
                     "main_detail_markdown": result.main_detail_markdown,
+                    "md_path": result.md_path,
                 }
             }
         except json.JSONDecodeError as exc:

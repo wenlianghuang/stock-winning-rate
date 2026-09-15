@@ -109,7 +109,7 @@ uv run --extra mcp --extra stock --extra ui python -m unittest tests.test_mcp_se
 | `run_position_gate` | 有均價／張數 | CSV + 持股 | 寫 position 產物 |
 | `run_market_daily` | 開盤前日報 | 無（可自抓） | 寫日報 |
 | `answer_market_chat` | 問既有日報 | 最好已有 facts | 無（或只讀） |
-| `draft_digest` | 多檔融合成信稿 | 報告 md | 無（只產草稿） |
+| `draft_digest` | 多檔融合成信稿 | 報告 md | 寫 `reports/digest/{日期}/digest.md`（不寄信） |
 | `send_digest` | 人已核准要寄 | 草稿 + `approved` | **需核准**；本 repo 不發信 |
 
 演示用呼叫（MCP arguments，不是新的日常 CLI）：

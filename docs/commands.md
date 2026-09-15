@@ -38,6 +38,7 @@ uv run --extra ui --extra stock python main.py position-gate -- --all-holdings
 - `tw_stock_{代碼}.csv` / `_history.csv` — 籌碼快照
 - `tw_stock_{代碼}.md` / `.facts.json` / `.gate.log` / `.gate.rounds/` — report-gate
 - `tw_stock_{代碼}_position.md` / `.position.facts.json` / `.position.gate.*` — position-gate
+- `reports/digest/{日期}/digest.md` — `draft_digest` email 草稿（不寄信）
 
 ---
 
@@ -139,7 +140,7 @@ ADK Web：`http://127.0.0.1:8002`。步驟見 [`a2a-adk.md`](./a2a-adk.md)。
 
 ## Orchestrator（一句話意圖，Phase 2–3）
 
-細節見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 權限預設關閉，只產草稿並標待核准。實際執行會寫 `reports/agent/{日期}/run_{id}.jsonl`。
+細節見 [`Phase2.md`](./Phase2.md)、[`Phase3.md`](./Phase3.md)。不必再指定 `/gate` 或 `/position`。`send_digest` 權限預設關閉，只產草稿並標待核准。實際執行會寫 `reports/agent/{日期}/run_{id}.jsonl` 與 `reports/digest/{日期}/digest.md`。
 
 這是單 process 的意圖編排與角色 allowlist，**不是** Agent2Agent 協定。A2A 入口是 `python main.py a2a`，見 [`Phase5.md`](./Phase5.md)、[`a2a.md`](./a2a.md)。
 

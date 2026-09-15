@@ -136,7 +136,7 @@ uv run --extra stock --extra ui python -m unittest tests.test_agent_tools
 | `run_market_daily` | `market-daily` | 寫日報 |
 | `get_holdings` | `holdings.json`／API 持倉欄 | 無 |
 | `answer_market_chat` | `market_day_chat` | 無（或只讀） |
-| `draft_digest` | `POST /digest` 的 agy 融合 | 無（只產草稿） |
+| `draft_digest` | `POST /digest` 的 agy 融合 | 寫 `reports/digest/{日期}/digest.md`（不寄信） |
 | `send_digest` | report-site 寄信 | **需核准**；本 repo 不發信 |
 
 呼叫例（給之後 MCP／測試用，不是新的日常 CLI）：

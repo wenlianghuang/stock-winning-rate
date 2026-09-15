@@ -252,7 +252,11 @@ class ExecutePhase3Tests(unittest.TestCase):
                 )
             if tool == "draft_digest":
                 self.assertTrue(args.get("items"))
-                return _ok("draft_digest", subject="2026-08-18 台股籌碼日報｜fixture")
+                return _ok(
+                    "draft_digest",
+                    subject="2026-08-18 台股籌碼日報｜fixture",
+                    md_path="/tmp/digest.md",
+                )
             if tool == "send_digest":
                 self.fail("send_digest must not be dispatched")
             raise AssertionError(tool)
@@ -276,6 +280,7 @@ class ExecutePhase3Tests(unittest.TestCase):
         )
         self.assertNotIn("send_digest", tools)
         self.assertEqual(run.digest_status, DIGEST_PENDING)
+        self.assertEqual(run.digest_md_path, "/tmp/digest.md")
         self.assertTrue(any("權限關閉" in note or "待核准" in note for note in run.notes))
         pairs = [(event.frm, event.to) for event in run.handoffs]
         self.assertIn((ROLE_RESEARCH, ROLE_VALIDATOR), pairs)

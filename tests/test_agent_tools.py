@@ -17,10 +17,11 @@ if str(ROOT) not in sys.path:
 
 from agent.tools.chips import build_chip_facts, fetch_chips  # noqa: E402
 from agent.tools.dates import get_last_trading_date  # noqa: E402
-from agent.tools.digest import send_digest  # noqa: E402
+from agent.tools.digest import DigestItem, draft_digest, send_digest  # noqa: E402
 from agent.tools.position import get_holdings, run_position_gate  # noqa: E402
 from agent.tools.report import run_report_gate  # noqa: E402
 from agent.tools._types import (  # noqa: E402
+    EXIT_BAD_ARGS,
     EXIT_CSV_MISSING,
     EXIT_FAILED,
     EXIT_HOLDING_MISSING,
@@ -186,6 +187,50 @@ class AgentToolsDigestTests(unittest.TestCase):
         self.assertEqual(result.exit_code, EXIT_FAILED)
         self.assertEqual(result.status, "blocked")
         self.assertEqual(result.error, "needs_approval")
+
+    def test_draft_digest_rejects_bad_date(self) -> None:
+        result = draft_digest(
+            digest_date="../etc",
+            items=[DigestItem(stock_id="2330", markdown="x" * 40)],
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.exit_code, EXIT_BAD_ARGS)
+        self.assertIsNone(result.md_path)
+
+    def test_draft_digest_writes_markdown(self) -> None:
+        payload = {
+            "subject": "2026-09-14 台股籌碼日報｜外資調節",
+            "main_detail_markdown": "今日大盤走弱。\n\n## 重點摘要\n- 台積電法人賣超",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch("agent.tools.digest.DIGEST_ROOT", Path(tmp)),
+                patch(
+                    "agent.tools.digest._run_agy",
+                    return_value=json.dumps(payload),
+                ),
+            ):
+                result = draft_digest(
+                    digest_date="2026-09-14",
+                    items=[
+                        DigestItem(
+                            stock_id="2330",
+                            stock_name="台積電",
+                            markdown="台積電外資賣超。籌碼偏空。" * 4,
+                        )
+                    ],
+                )
+            self.assertTrue(result.ok, result.error)
+            self.assertEqual(result.exit_code, EXIT_OK)
+            self.assertEqual(result.subject, payload["subject"])
+            self.assertEqual(result.digest_date, "2026-09-14")
+            md_path = Path(result.md_path or "")
+            self.assertEqual(md_path, (Path(tmp) / "2026-09-14" / "digest.md").resolve())
+            self.assertTrue(md_path.exists())
+            text = md_path.read_text(encoding="utf-8")
+            self.assertIn(payload["subject"], text)
+            self.assertIn("pending_approval", text)
+            self.assertIn("今日大盤走弱", text)
 
 
 if __name__ == "__main__":

@@ -152,7 +152,7 @@ uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-09-15
 uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-09-15 -- "明天開盤怎麼看"
 ```
 
-實際執行會寫既有產物路徑：`reports/stock/{日期}/`、`reports/market/{日期}/`。CLI 會印 plan、每步 tool、gate 通過與否（PASS／FAIL）、以及 `digest=pending_approval`。信不會寄出。
+實際執行會寫既有產物路徑：`reports/stock/{日期}/`、`reports/market/{日期}/`、`reports/digest/{日期}/digest.md`。CLI 會印 plan、每步 tool、gate 通過與否（PASS／FAIL）、以及 `digest=pending_approval`。信不會寄出。
 
 本機 `--dry-run` 對「幫我處理今天持股」的樣子（holdings 範例只有 2409；該日若已有 CSV 就不會列入 fetch）：
 

@@ -308,7 +308,8 @@ def _register_tools(mcp: FastMCP) -> None:
         annotations=ToolAnnotations(readOnlyHint=False, title="Draft email digest"),
         description=(
             "把同日多檔報告融合成 email 草稿（不寄信）。需要 digest_date 與 items"
-            "（每筆 stock_id、markdown，可選 position_markdown）。需要 agy。這不是 send。"
+            "（每筆 stock_id、markdown，可選 position_markdown）。寫 reports/digest/{日期}/digest.md，"
+            "回傳 md_path。需要 agy。這不是 send。"
         ),
     )
     def draft_digest(

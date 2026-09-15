@@ -220,7 +220,11 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
                 )
             if tool == "draft_digest":
                 self.assertTrue(args.get("items"))
-                return _ok("draft_digest", subject="2026-08-18 台股籌碼日報｜fixture")
+                return _ok(
+                    "draft_digest",
+                    subject="2026-08-18 台股籌碼日報｜fixture",
+                    md_path="/tmp/digest.md",
+                )
             if tool == "run_market_daily":
                 return _ok("run_market_daily", trade_date="2026-08-18", md_path="/tmp/daily.md")
             if tool == "answer_market_chat":
@@ -248,6 +252,8 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
         )
         self.assertTrue(run.ok)
         self.assertEqual(run.digest_status, DIGEST_PENDING)
+        self.assertEqual(run.digest_subject, "2026-08-18 台股籌碼日報｜fixture")
+        self.assertEqual(run.digest_md_path, "/tmp/digest.md")
         self.assertNotIn("send_digest", tools)
         report = next(step for step in run.steps if step.tool == "run_report_gate")
         position = next(step for step in run.steps if step.tool == "run_position_gate")
