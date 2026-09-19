@@ -58,6 +58,8 @@ uv run --extra a2a python main.py a2a-adk --howto
 
 已裝過依賴可加 `--skip-install`（`uv run --frozen`）。
 
+正式句：
+> 2059今天表現如何?
 ---
 
 ## 3. 常見踩坑

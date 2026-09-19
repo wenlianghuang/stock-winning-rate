@@ -1,10 +1,10 @@
-"""Shared agy prompt instructions for single-stock analysis (tables + no chip repeat)."""
+"""Shared agy prompt instructions for single-stock analysis (narrative only; no chip tables)."""
 
 from __future__ import annotations
 
 ANALYSIS_FORMAT_RULES = """
 輸出格式（Markdown）：
-- **不要**重複列出籌碼數字（系統會自動在報告前段插入籌碼表格，含當日、區間摘要與歷史明細）
+- **不要**重複列出籌碼數字（數字以 facts.json 為準；籌碼表由網站摘要／圖表與 PDF 匯出呈現，正文不要列表格）
 - **數字與清單用表、解釋與推理用文字**（見各章節說明）
 - 分析須依據**系統已計算的籌碼事實（facts）**，方向判定不可與 facts 矛盾
 - 正文須明確引用 facts 中的 anchors（至少 2 條），作為趨勢與交叉對照的依據

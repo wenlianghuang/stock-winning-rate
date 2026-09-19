@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 POSITION_ANALYSIS_FORMAT_RULES = """
 輸出格式（Markdown）：
-- **不要**重複列出 CSV 籌碼數字（系統會自動在報告前段插入籌碼表格與部位摘要表）
+- **不要**重複列出 CSV 籌碼數字（數字以 facts / position.facts.json 為準；表格由網站摘要與 PDF 匯出呈現，正文不要列表格）
 - **市場面**須依 CSV 與（若有）市場觀察報告理解趨勢，但正文以文字摘要，勿複製籌碼表格
 - 分析須同時參考：**當日快照 CSV**、**歷史 CSV**、**區間摘要欄位**、**系統提供的部位資料**
 

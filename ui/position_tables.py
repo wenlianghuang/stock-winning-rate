@@ -176,6 +176,7 @@ def merge_position_report_body(
     holding: HoldingInfo,
     agy_body: str,
 ) -> str:
+    """Compose chip + position tables + narrative for PDF / export."""
     row = load_csv_row(csv_path)
     if row is None:
         return agy_body.strip()

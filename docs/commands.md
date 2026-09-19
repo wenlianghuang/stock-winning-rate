@@ -36,8 +36,8 @@ uv run --extra ui --extra stock python main.py position-gate -- --all-holdings
 主要產物：
 
 - `tw_stock_{代碼}.csv` / `_history.csv` — 籌碼快照
-- `tw_stock_{代碼}.md` / `.facts.json` / `.gate.log` / `.gate.rounds/` — report-gate
-- `tw_stock_{代碼}_position.md` / `.position.facts.json` / `.position.gate.*` — position-gate
+- `tw_stock_{代碼}.md`（敘事） / `.facts.json`（表格來源） / `.gate.log` / `.gate.rounds/` — report-gate
+- `tw_stock_{代碼}_position.md`（敘事） / `.position.facts.json`（表格來源） / `.position.gate.*` — position-gate
 - `reports/digest/{日期}/digest.md` — `draft_digest` email 草稿（不寄信）
 
 ---

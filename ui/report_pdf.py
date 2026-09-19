@@ -474,13 +474,13 @@ def write_summary_artifacts(
     *,
     skip_pdf: bool = False,
 ) -> tuple[Path, Path | None]:
-    """Write Markdown and optional PDF next to the CSV. Returns (md_path, pdf_path)."""
-    full_body = merge_report_body(csv_path, body)
+    """Write Markdown (narrative only) and optional PDF (tables + narrative)."""
     md_path, pdf_path = summary_paths_for_csv(csv_path)
-    write_summary_markdown(md_path, csv_path, full_body, meta)
+    write_summary_markdown(md_path, csv_path, body, meta)
     if skip_pdf:
         return md_path, None
-    pdf_ok = write_summary_pdf(pdf_path, csv_path, full_body, meta)
+    composed = merge_report_body(csv_path, body)
+    pdf_ok = write_summary_pdf(pdf_path, csv_path, composed, meta)
     return md_path, pdf_path if pdf_ok else None
 
 
@@ -492,13 +492,13 @@ def write_position_artifacts(
     *,
     skip_pdf: bool = False,
 ) -> tuple[Path, Path | None]:
-    """Write position Markdown/PDF next to the CSV. Returns (md_path, pdf_path)."""
+    """Write position Markdown (narrative only) and optional PDF (tables + narrative)."""
     from position_tables import merge_position_report_body
 
-    full_body = merge_position_report_body(csv_path, holding, body)
     md_path, pdf_path = position_paths_for_csv(csv_path)
-    write_position_markdown(md_path, csv_path, full_body, meta)
+    write_position_markdown(md_path, csv_path, body, meta)
     if skip_pdf:
         return md_path, None
-    pdf_ok = write_position_pdf(pdf_path, csv_path, full_body, meta)
+    composed = merge_position_report_body(csv_path, holding, body)
+    pdf_ok = write_position_pdf(pdf_path, csv_path, composed, meta)
     return md_path, pdf_path if pdf_ok else None

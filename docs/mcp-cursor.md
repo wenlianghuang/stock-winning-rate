@@ -59,11 +59,16 @@ Cursor 這條**不要**自己在 terminal 跑 `python main.py mcp`，也不要�
 
 Ask mode 不會真的呼叫 MCP tools。開新的 **Agent** chat，核准有副作用的 tool（`fetch_chips` 寫 CSV，`run_report_gate` 寫 md／facts／gate log）。
 
-Phase 1 演示 prompt（無持股、不跑部位、不寄信）：
+Phase 1 演示1 prompt（無持股、不跑部位、不寄信）：
 
 > 用 stock-winning-rate 的 MCP tools，對 2330 產出一份沒有持股的深度報告。先 `fetch_chips`（stocks 為 `["2330"]`），再 `run_report_gate`（stock_id `2330`，skip_pdf true）。不要跑 `run_position_gate`，也不要 `send_digest`。每一步把 tool 回傳的 ok / exit_code / csv_paths / trade_date 貼出來。
 
 預期順序：`fetch_chips` → `run_report_gate`。不要呼叫 `run_position_gate`、`draft_digest`、`send_digest`。
+
+demo 2 prompt(該有的tool都跑)
+> 我手上有2330 500股，均價2000元，用stock-winning-rate的MCP去生成一個報告並寫出一個email草稿
+
+預期順序: `fetch_chips` → `run_report_gate` → `run_position_gate` → `draft_digest`
 
 ---
 

@@ -390,6 +390,7 @@ def _build_base_rate_markdown(
 
 
 def merge_report_body(csv_path: Path, agy_body: str) -> str:
+    """Compose chip tables + narrative for PDF / export. Markdown files stay narrative-only."""
     row = load_csv_row(csv_path)
     if row is None:
         return agy_body.strip()

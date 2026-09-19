@@ -430,8 +430,9 @@ def append_gate_log(log_path: Path, entry: dict) -> None:
 def extract_body_from_saved_md(md_path: Path) -> str:
     text = md_path.read_text(encoding="utf-8")
     marker = "\n---\n\n"
-    if marker in text:
-        return text.split(marker, 1)[1].strip()
+    parts = text.split(marker)
+    if len(parts) >= 2:
+        return parts[-1].strip()
     return text.strip()
 
 

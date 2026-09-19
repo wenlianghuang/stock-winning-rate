@@ -59,9 +59,9 @@ Chat UI：`/gate 2409` 或 `/report-gate 2409`
 
 ## Output
 
-- `reports/stock/{日期}/tw_stock_{代碼}.md`
-- `reports/stock/{日期}/tw_stock_{代碼}.pdf`（除非 `--skip-pdf`）
-- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 並作為事實驗證基準）
+- `reports/stock/{日期}/tw_stock_{代碼}.md`（**敘事正文**；籌碼表不寫入 md）
+- `reports/stock/{日期}/tw_stock_{代碼}.pdf`（除非 `--skip-pdf`；PDF 匯出時才組裝籌碼表 + 敘事）
+- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 並作為事實驗證基準；網站摘要／圖表讀此檔）
 - `reports/stock/{日期}/tw_stock_{代碼}.gate.log`（每輪驗證 JSON 紀錄，含 `layers` 與 `issue_codes`）
 - `reports/stock/{日期}/tw_stock_{代碼}.gate.rounds/`（各輪比較）
   - `index.md` — 輪次摘要與比較指引
