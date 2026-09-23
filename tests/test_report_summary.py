@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
 
-from chip_signals import build_chip_facts  # noqa: E402
+from chip_signals import build_base_rate_table_payload, build_chip_facts  # noqa: E402
 from report_summary import (  # noqa: E402
     build_market_summary,
     extract_list_items,
@@ -115,6 +115,30 @@ class ReportSummaryTests(unittest.TestCase):
         self.assertEqual(len(summary["narrative"]["cross_points"]), 2)
         self.assertEqual(len(summary["narrative"]["scenarios"]), 2)
         self.assertEqual(len(summary["narrative"]["watch_items"]), 2)
+        self.assertTrue(summary["base_rate"] is None or isinstance(summary["base_rate"], dict))
+
+    def test_base_rate_payload_shape(self) -> None:
+        facts = build_chip_facts(_sample_row(), [])
+        rates = {
+            "min_bucket_sample": 20,
+            "sample": {"start": "2024-01-01", "end": "2026-06-01", "stocks": 40, "regime": "偏多"},
+            "global": {"5d": {"mean_excess": 0.2}},
+            "buckets": {
+                "chip_regime": {
+                    facts.chip_regime: {
+                        "3d": {"n": 25, "p_up_shrunk": 0.44, "mean_excess_shrunk": 0.3},
+                        "5d": {"n": 25, "p_up_shrunk": 0.48, "mean_excess_shrunk": 0.8},
+                    }
+                }
+            },
+        }
+        payload = build_base_rate_table_payload(facts, rates)
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["title"], "歷史命中率（同型態個股 forward 表現）")
+        self.assertEqual(payload["rows"][0]["key"], "chip_regime")
+        self.assertEqual(payload["rows"][0]["h5"]["n"], 25)
+        self.assertEqual(payload["tilt"], "偏多")
 
     def test_write_and_merge_summary(self) -> None:
         row = _sample_row()

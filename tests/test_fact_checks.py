@@ -73,5 +73,34 @@ class MaAlignmentFalsePositiveTests(unittest.TestCase):
         self.assertNotIn("fact_ma_stack_mismatch", codes)
 
 
+class DivergenceIgnoredFalsePositiveTests(unittest.TestCase):
+    """Substring 「籌碼穩定」「籌碼健康」must not trip when the sentence is
+    about 穩定度 being stressed, or an explicit denial."""
+
+    def _codes(self, body: str) -> list[str]:
+        return [
+            code
+            for code, _ in run_fact_checks(
+                body, _facts(divergences=["price_up_foreign_sell"])
+            )
+        ]
+
+    def test_stability_degree_under_pressure_not_flagged(self) -> None:
+        body = "當沖佔比偏高，籌碼穩定度因而受抑。"
+        self.assertNotIn("fact_divergence_ignored", self._codes(body))
+
+    def test_stability_degree_under_test_not_flagged(self) -> None:
+        body = "欠缺法人實質長線買盤支撐，籌碼穩定度因而面臨考驗。"
+        self.assertNotIn("fact_divergence_ignored", self._codes(body))
+
+    def test_negated_healthy_claim_not_flagged(self) -> None:
+        body = "此架構絕非籌碼健康或量價配合良好，而是典型的量價背離。"
+        self.assertNotIn("fact_divergence_ignored", self._codes(body))
+
+    def test_genuine_healthy_claim_still_flagged(self) -> None:
+        body = "整體來看籌碼穩定，量價配合良好。"
+        self.assertIn("fact_divergence_ignored", self._codes(body))
+
+
 if __name__ == "__main__":
     unittest.main()

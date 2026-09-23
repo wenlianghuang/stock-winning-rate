@@ -1998,6 +1998,83 @@ def _base_rate_sample_note(base_rates: dict | None) -> str | None:
     )
 
 
+def build_base_rate_table_payload(
+    facts,
+    base_rates: dict | None = None,
+) -> dict | None:
+    """Structured hit-rate block for the website data tab (same numbers as Markdown)."""
+    if base_rates is None:
+        base_rates = load_base_rates()
+    if not base_rates:
+        return None
+    buckets = base_rates.get("buckets", {})
+    if not isinstance(buckets, dict):
+        return None
+    min_sample = int(
+        base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
+        or _BASE_RATE_MIN_SAMPLE_DEFAULT
+    )
+
+    def _horizon(raw: object) -> dict[str, object]:
+        if not isinstance(raw, dict) or int(raw.get("n", 0) or 0) <= 0:
+            return {"p_up": None, "excess": None, "n": 0}
+        p_up = raw.get("p_up_shrunk", raw.get("p_up"))
+        excess = raw.get("mean_excess_shrunk", raw.get("mean_excess"))
+        return {
+            "p_up": float(p_up) if p_up is not None else None,
+            "excess": float(excess) if excess is not None else None,
+            "n": int(raw.get("n", 0) or 0),
+        }
+
+    rows: list[dict[str, object]] = []
+    for key, name in _BASE_RATE_LABEL_NAMES.items():
+        value = getattr(facts, key, "unknown")
+        if value in (None, "", "unknown"):
+            continue
+        stats = buckets.get(key, {}).get(str(value))
+        if not isinstance(stats, dict):
+            continue
+        h3, h5 = _horizon(stats.get("3d")), _horizon(stats.get("5d"))
+        n = max(int(h3["n"] or 0), int(h5["n"] or 0))
+        if n <= 0:
+            continue
+        rows.append(
+            {
+                "key": key,
+                "dimension": name,
+                "state": str(value),
+                "h3": h3,
+                "h5": h5,
+                "sample_n": n,
+                "confidence": _base_rate_confidence(n, min_sample),
+            }
+        )
+    if not rows:
+        return None
+
+    payload: dict[str, object] = {
+        "title": "歷史命中率（同型態個股 forward 表現）",
+        "note": _base_rate_sample_note(base_rates)
+        or (
+            "依系統 regime 標籤對照回測樣本；已對小樣本收縮，"
+            "與技術面/動能判讀衝突時以動能為準，僅供情境權重參考、非保證。"
+        ),
+        "rows": rows,
+    }
+    edge = base_rate_forward_edge(facts, base_rates, min_sample=min_sample)
+    if edge is not None:
+        tilt = base_rate_tilt_label(edge)
+        sample = base_rates.get("sample") if isinstance(base_rates, dict) else None
+        regime = sample.get("regime") if isinstance(sample, dict) else None
+        tilt_note = f"中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；已納入操作情境權重"
+        if regime in ("偏多", "偏空", "震盪"):
+            tilt_note += f"；樣本以「大盤{regime}」環境為主，遇明確反向趨勢時本傾向可能失效"
+        payload["edge"] = edge
+        payload["tilt"] = tilt
+        payload["tilt_note"] = tilt_note
+    return payload
+
+
 def build_base_rate_table_markdown(
     facts,
     base_rates: dict | None = None,

@@ -33,6 +33,15 @@ def summary_json_path(csv_path: Path) -> Path:
     return csv_path.with_suffix(".summary.json")
 
 
+def _build_base_rate_payload(facts) -> dict[str, Any] | None:
+    try:
+        from chip_signals import build_base_rate_table_payload
+
+        return build_base_rate_table_payload(facts)
+    except Exception:
+        return None
+
+
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
@@ -418,6 +427,7 @@ def build_market_summary(
             "watch_items": extract_list_items(watch_section),
         },
         "anchors": list(facts.anchors or []),
+        "base_rate": _build_base_rate_payload(facts),
     }
 
 

@@ -175,7 +175,7 @@ FIX_HINT_BY_CODE: dict[str, str] = {
     "fact_volume_trend_mismatch": "量能趨勢（5日/20日均量）描述與 facts 矛盾，請依系統量能趨勢修正",
     "fact_volume_price_divergence_mismatch": "價量關係描述與 facts（volume_price_divergence）矛盾，請依系統價量判定修正",
     "fact_price_trend_mismatch": "區間價格趨勢描述與 facts（price_trend）矛盾，請依區間漲跌方向修正",
-    "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，正文不可描述為籌碼健康或量價配合良好",
+    "fact_divergence_ignored": "facts 已標記量價背離/風險旗標，正文不可斷言籌碼健康或量價配合良好（「絕非…」「籌碼穩定度受抑」等否定／程度詞不計）",
     "fact_chip_regime_mismatch": "籌碼型態敘述與 facts 的 chip_regime 矛盾，請依系統判定修正",
     "fact_institutional_mismatch": "三大法人共識敘述與 facts 矛盾，請依 institutional_consensus 修正",
     "fact_major_foreign_ignored": "須在趨勢/交叉段說明主力與外資的方向背離",

@@ -355,6 +355,13 @@ CHIP_HEALTHY_PHRASES = (
     "籌碼結構良好",
     "籌碼面樂觀",
 )
+# 「籌碼穩定度」是安定程度的名詞，不是「籌碼穩定」的樂觀斷語。
+# 「絕非籌碼健康」等否定子句也不算主張籌碼健康。
+_CHIP_STABILITY_DEGREE = "籌碼穩定度"
+_HEALTHY_DENIAL_RE = re.compile(
+    r"(?:絕非|並非|不是|並不是|並不|並未|未見|絕不是|談不上|難以稱|而非)"
+    r"[^。；，\n]*"
+)
 CHIP_ACCUMULATION_PHRASES = (
     "籌碼集中",
     "籌碼沈澱",
@@ -436,6 +443,12 @@ def _mask_neutral_alignment(text: str) -> str:
     for phrase in NEUTRAL_ALIGNMENT_PHRASES:
         text = text.replace(phrase, "")
     return text
+
+
+def _mask_healthy_chip_denials(text: str) -> str:
+    """Drop wording that contains healthy-chip substrings but is not a bullish claim."""
+    text = text.replace(_CHIP_STABILITY_DEGREE, "")
+    return _HEALTHY_DENIAL_RE.sub("", text)
 
 
 def _current_state_region(text: str) -> str:
@@ -1038,7 +1051,9 @@ def run_fact_checks(
             )
 
     if getattr(facts, "divergences", None):
-        hit = _contains_any(_strip_tables(text), CHIP_HEALTHY_PHRASES)
+        hit = _contains_any(
+            _mask_healthy_chip_denials(_strip_tables(text)), CHIP_HEALTHY_PHRASES
+        )
         if hit:
             issues.append(
                 (

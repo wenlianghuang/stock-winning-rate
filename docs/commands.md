@@ -72,7 +72,9 @@ uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎
 
 ## 投資組合
 
-產物在 `reports/portfolio/{日期}/`。候選池：`.agents/skills/portfolio-gate/portfolio_universe.json`、`portfolio_theme_universe.json`。
+概念、規則層、三層 gate 與網站 HTTP 流程見 [`portfolio.md`](./portfolio.md)。
+
+產物在 `reports/portfolio/{日期}/`。候選池：`.agents/skills/portfolio-gate/portfolio_universe.json`、`portfolio_theme_universe.json`。日常網站走 Go API（`:8765`）的 `GET /portfolio`、`POST /portfolio/jobs`。候選池缺當日 CSV 時 API 會自動 `FetchStock` 補抓（不跑個股 gate）。不需要先跑下面的 Python CLI。
 
 ```bash
 # 規則組倉（不呼叫 agy）
