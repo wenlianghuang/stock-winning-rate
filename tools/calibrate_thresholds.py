@@ -9,6 +9,8 @@ or the sample is too small):
     Percentile cutoffs from each stock's *own* price history (rolling RSI / ATR%
     / volume ratio out of its latest 60-day ``_chart_history.csv``). Lets
     "RSI 偏高" mean the top of *this* stock's range instead of a fixed 70.
+    Soft percentiles are clamped to absolute floors/ceilings (same bands as
+    ``chip_signals``) so low-vol names cannot call RSI 55 "overbought".
 
 (b) ``reports/calibration/base_rates.json``
     Per-regime forward-excess statistics aggregated from ``outcomes.jsonl``,
@@ -114,10 +116,13 @@ def _latest_chart_history(stock_id: str) -> Path | None:
     if not root.exists():
         return None
     best: Path | None = None
+    name = f"tw_stock_{stock_id}_chart_history.csv"
     for date_dir in sorted(root.iterdir()):
-        candidate = date_dir / f"tw_stock_{stock_id}_chart_history.csv"
-        if candidate.exists():
-            best = candidate  # sorted ascending -> keep latest
+        if not date_dir.is_dir():
+            continue
+        for candidate in (date_dir / stock_id / name, date_dir / name):
+            if candidate.exists():
+                best = candidate  # sorted ascending -> keep latest
     return best
 
 
@@ -178,6 +183,26 @@ def calibrate_stock_thresholds(stock_ids: list[str], *, quiet: bool) -> int:
         vol = series["vol_ratio"]
         if len(rsi) < MIN_THRESHOLD_SAMPLE:
             continue
+        rsi_ob = _percentile(rsi, PCT_HIGH)
+        rsi_os = _percentile(rsi, PCT_LOW)
+        atr_hi = _percentile(atr, PCT_HIGH)
+        atr_lo = _percentile(atr, PCT_LOW)
+        vol_spike = _percentile(vol, PCT_HIGH)
+        vol_shrink = _percentile(vol, PCT_LOW)
+        # Absolute clamps (mirror ui/chip_signals) so written files are safe even
+        # if an older reader skips runtime clamping.
+        if rsi_ob is not None:
+            rsi_ob = max(rsi_ob, 65.0)
+        if rsi_os is not None:
+            rsi_os = min(rsi_os, 35.0)
+        if atr_hi is not None:
+            atr_hi = max(atr_hi, 2.5)
+        if atr_lo is not None:
+            atr_lo = min(atr_lo, 2.0)
+        if vol_spike is not None:
+            vol_spike = max(vol_spike, 1.35)
+        if vol_shrink is not None:
+            vol_shrink = min(vol_shrink, 0.75)
         payload: dict[str, Any] = {
             "stock_id": stock_id,
             "computed_at": today,
@@ -185,12 +210,12 @@ def calibrate_stock_thresholds(stock_ids: list[str], *, quiet: bool) -> int:
             "n_rsi": len(rsi),
             "n_atr": len(atr),
             "n_vol": len(vol),
-            "rsi_overbought": _percentile(rsi, PCT_HIGH),
-            "rsi_oversold": _percentile(rsi, PCT_LOW),
-            "atr_pct_high": _percentile(atr, PCT_HIGH),
-            "atr_pct_low": _percentile(atr, PCT_LOW),
-            "volume_spike_ratio": _percentile(vol, PCT_HIGH),
-            "volume_shrink_ratio": _percentile(vol, PCT_LOW),
+            "rsi_overbought": rsi_ob,
+            "rsi_oversold": rsi_os,
+            "atr_pct_high": atr_hi,
+            "atr_pct_low": atr_lo,
+            "volume_spike_ratio": vol_spike,
+            "volume_shrink_ratio": vol_shrink,
         }
         out = calibration_dir() / f"{stock_id}.thresholds.json"
         out.write_text(
@@ -214,7 +239,9 @@ def _all_stock_ids() -> list[str]:
     for date_dir in root.iterdir():
         if not date_dir.is_dir():
             continue
-        for path in date_dir.glob("tw_stock_*_chart_history.csv"):
+        paths = list(date_dir.glob("*/tw_stock_*_chart_history.csv"))
+        paths.extend(date_dir.glob("tw_stock_*_chart_history.csv"))
+        for path in paths:
             match = re.match(r"^tw_stock_(\d+)_chart_history\.csv$", path.name)
             if match:
                 ids.add(match.group(1))

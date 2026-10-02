@@ -60,7 +60,7 @@ stderr 會印 `A2A Inspector UI 127.0.0.1:5001`。瀏覽器開：
 
 > 2330 要不要動
 
-預期：Inspector 看到 task completed；本機 `reports/stock/{日期}/tw_stock_2330.md`。plan **沒有** `run_position_gate`、`send_digest`。
+預期：Inspector 看到 task completed；本機 `reports/stock/{日期}/2330/tw_stock_2330.md`。plan **沒有** `run_position_gate`、`send_digest`。
 
 不要第一句就「幫我處理今天持股」：會對 holdings 裡的 2409 連跑 report + position，agy 多輪、慢。
 

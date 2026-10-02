@@ -135,10 +135,12 @@ class ReportSummaryTests(unittest.TestCase):
         payload = build_base_rate_table_payload(facts, rates)
         self.assertIsNotNone(payload)
         assert payload is not None
-        self.assertEqual(payload["title"], "歷史命中率（同型態個股 forward 表現）")
+        self.assertEqual(payload["title"], "歷史 forward 對照（相對大盤超額）")
         self.assertEqual(payload["rows"][0]["key"], "chip_regime")
         self.assertEqual(payload["rows"][0]["h5"]["n"], 25)
         self.assertEqual(payload["tilt"], "偏多")
+        self.assertIn("p_up", payload["columns"])
+        self.assertEqual(payload["columns"]["p_up"], "贏大盤占比")
 
     def test_write_and_merge_summary(self) -> None:
         row = _sample_row()

@@ -72,7 +72,7 @@ def run_beginner(
     base_rates = load_base_rates()
     print(
         f"[beginner] 候選池 {len(candidates)} 檔，{trade_date} 有資料 {available} 檔"
-        f"{'（含 base_rates 勝率）' if base_rates else '（無 base_rates，略過勝率加權）'}",
+        f"{'（含 base_rates 超額傾斜）' if base_rates else '（無 base_rates，略過超額加權）'}",
         file=sys.stderr,
     )
 

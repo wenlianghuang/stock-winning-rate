@@ -303,8 +303,11 @@ def _leader_week_stats(
     from chip_tables import load_csv_row, load_history_rows
 
     week_end = trading_days[-1]
-    csv_path = project_root() / "reports" / "stock" / week_end / f"tw_stock_{stock_id}.csv"
-    if not csv_path.exists():
+    ensure_import_paths()
+    from stock_paths import find_stock_csv
+
+    csv_path = find_stock_csv(stock_id, week_end, root=project_root())
+    if csv_path is None:
         return None
     row = load_csv_row(csv_path)
     if row is None:

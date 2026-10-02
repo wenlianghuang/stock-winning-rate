@@ -64,12 +64,9 @@ def _resolve_snapshot_csv(
     if not stock_id:
         return None
 
-    stock_root = ROOT / "reports" / "stock"
-    if trade_date:
-        candidate = stock_root / trade_date / f"tw_stock_{stock_id}.csv"
-        return candidate if candidate.exists() else None
-    matches = sorted(stock_root.glob(f"*/tw_stock_{stock_id}.csv"))
-    return matches[-1] if matches else None
+    from stock_paths import find_stock_csv
+
+    return find_stock_csv(stock_id, trade_date, root=ROOT)
 
 
 def fetch_chips(

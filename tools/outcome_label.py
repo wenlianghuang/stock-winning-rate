@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Outcome labeling job: join historical chip snapshots with realized forward prices.
 
-For every daily snapshot ``reports/stock/{date}/tw_stock_{id}.csv`` this job:
+For every daily snapshot ``reports/stock/{date}/{id}/tw_stock_{id}.csv`` this job:
 
 1. Recomputes the deterministic ``ChipFacts`` from the snapshot + history CSV
    (using the *current* ``chip_signals`` so every date shares one label schema --
@@ -111,7 +111,10 @@ def build_price_oracle() -> tuple[dict[str, dict[str, float]], dict[str, float]]
     for date_dir in sorted(root.iterdir()):
         if not date_dir.is_dir():
             continue
-        for csv_path in date_dir.glob("tw_stock_*_chart_history.csv"):
+        # Nested: {date}/{id}/tw_stock_*_chart_history.csv and flat fallback
+        chart_paths = list(date_dir.glob("*/tw_stock_*_chart_history.csv"))
+        chart_paths.extend(date_dir.glob("tw_stock_*_chart_history.csv"))
+        for csv_path in chart_paths:
             match = re.match(r"^tw_stock_(\d+)_chart_history\.csv$", csv_path.name)
             if not match:
                 continue
@@ -122,7 +125,13 @@ def build_price_oracle() -> tuple[dict[str, dict[str, float]], dict[str, float]]
                 close = _to_float(row.get("收盤價"))
                 if date and close is not None:
                     series[date] = close
-        for csv_path in date_dir.glob("tw_stock_*.csv"):
+        snap_paths = list(date_dir.glob("*/tw_stock_*.csv"))
+        snap_paths.extend(date_dir.glob("tw_stock_*.csv"))
+        seen: set[Path] = set()
+        for csv_path in snap_paths:
+            if csv_path in seen:
+                continue
+            seen.add(csv_path)
             match = _SNAPSHOT_RE.match(csv_path.name)
             if not match:
                 continue
@@ -163,16 +172,21 @@ def iter_snapshots() -> list[tuple[str, str, Path, Path]]:
     entries: list[tuple[str, str, Path, Path]] = []
     if not root.exists():
         return entries
+    ui = str(project_root() / "ui")
+    if ui not in sys.path:
+        sys.path.insert(0, ui)
+    from stock_paths import iter_date_snapshot_csvs
+
     for date_dir in sorted(root.iterdir()):
         if not date_dir.is_dir():
             continue
         trade_date = date_dir.name
-        for csv_path in sorted(date_dir.glob("tw_stock_*.csv")):
+        for csv_path in iter_date_snapshot_csvs(date_dir):
             match = _SNAPSHOT_RE.match(csv_path.name)
             if not match:
                 continue
             stock_id = match.group(1)
-            history = date_dir / f"tw_stock_{stock_id}_history.csv"
+            history = csv_path.with_name(f"tw_stock_{stock_id}_history.csv")
             entries.append((stock_id, trade_date, csv_path, history))
     return entries
 

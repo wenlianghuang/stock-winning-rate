@@ -247,6 +247,22 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+def change_pct_from_spread(spread: Any, close: Any) -> float | str:
+    """Convert FinMind price-point ``spread`` to percent change.
+
+    FinMind ``TaiwanStockPrice.spread`` is 漲跌點數（元／指數點），不是百分比。
+    Same formula as TAIEX market context: ``spread / (close - spread) * 100``.
+    """
+    spread_f = _to_float(spread)
+    close_f = _to_float(close)
+    if spread_f is None or close_f is None:
+        return ""
+    prev_close = close_f - spread_f
+    if not prev_close:
+        return ""
+    return round(spread_f / prev_close * 100, 2)
+
+
 def _to_int(value: Any) -> int | None:
     parsed = _to_float(value)
     if parsed is None:
@@ -503,7 +519,10 @@ def build_daily_row(
         "最低價": price_row.get("min", ""),
         "收盤價": price_row.get("close", ""),
         "成交量_張": shares_to_lots(trading_volume) if price_row else "",
-        "漲跌幅": price_row.get("spread", ""),
+        "漲跌幅": change_pct_from_spread(
+            price_row.get("spread", ""),
+            price_row.get("close", ""),
+        ),
         "外資買賣超_張": (
             shares_to_lots(calc_foreign_net(inst_row)) if inst_row else ""
         ),
@@ -1038,13 +1057,10 @@ def market_context_from_rows(
     ma20_val = _moving_average(trailing_closes, MA20_PERIOD)
 
     today_row = rows.get(trade_date, {})
-    spread = _to_float(today_row.get("spread"))
-    today_close = _to_float(today_row.get("close"))
-    change_pct: float | str = ""
-    if spread is not None and today_close is not None:
-        prev_close = today_close - spread
-        if prev_close:
-            change_pct = round(spread / prev_close * 100, 2)
+    change_pct = change_pct_from_spread(
+        today_row.get("spread"),
+        today_row.get("close"),
+    )
 
     first_close = None
     for day in sorted(closes_by_date):
@@ -1121,7 +1137,7 @@ def build_chart_history_rows(
                 "最低價": price_row.get("min", ""),
                 "收盤價": close,
                 "成交量_張": shares_to_lots(trading_volume) if trading_volume else "",
-                "漲跌幅": price_row.get("spread", ""),
+                "漲跌幅": change_pct_from_spread(price_row.get("spread", ""), close),
             }
         )
     return rows
@@ -1177,27 +1193,37 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _paths():
+    """Lazy-load ui.stock_paths (canonical reports/stock/{date}/{id}/ layout)."""
+    ui_path = str(project_root() / "ui")
+    if ui_path not in sys.path:
+        sys.path.insert(0, ui_path)
+    import stock_paths  # noqa: WPS433
+
+    return stock_paths
+
+
 def stock_report_dir(trade_date: str, *, root: Path | None = None) -> Path:
-    base = Path(root) if root is not None else project_root()
-    path = base / "reports" / "stock" / trade_date
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """Trade-date folder (not per-stock). Per-stock files go under ``{date}/{id}/``."""
+    return _paths().stock_day_dir(trade_date, root=root or project_root(), mkdir=True)
 
 
 def stock_csv_path(trade_date: str, stock_id: str) -> Path:
-    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}.csv"
+    return _paths().stock_csv_path(trade_date, stock_id, root=project_root())
 
 
 def stock_history_csv_path(trade_date: str, stock_id: str) -> Path:
-    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}_history.csv"
+    return _paths().stock_history_csv_path(trade_date, stock_id, root=project_root())
 
 
 def stock_chart_history_csv_path(trade_date: str, stock_id: str) -> Path:
-    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}_chart_history.csv"
+    return _paths().stock_chart_history_csv_path(
+        trade_date, stock_id, root=project_root()
+    )
 
 
 def stock_facts_json_path(trade_date: str, stock_id: str) -> Path:
-    return stock_report_dir(trade_date) / f"tw_stock_{stock_id}.facts.json"
+    return _paths().stock_facts_json_path(trade_date, stock_id, root=project_root())
 
 
 def _load_chip_signals():

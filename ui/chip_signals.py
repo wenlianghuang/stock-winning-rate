@@ -124,8 +124,8 @@ MA20_SLOPE_LABEL = {
 }
 
 RSI_ZONE_LABEL = {
-    "overbought": "RSI 偏高（動能過熱，留意回檔）",
-    "oversold": "RSI 偏低（動能偏弱，留意反彈）",
+    "overbought": "RSI 偏高（相對自身／絕對偏高，留意回檔）",
+    "oversold": "RSI 偏低（相對自身／絕對偏低，留意反彈）",
     "neutral": "RSI 中性區",
     "unknown": "RSI 資料不足",
 }
@@ -194,12 +194,22 @@ MA_CROSS_LOOKBACK_DAYS = 3
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70.0
 RSI_OVERSOLD = 30.0
+# Per-stock percentiles may sit near 50 for low-volatility names; never label
+# "overbought/oversold" softer than these absolute floors/ceilings.
+RSI_OVERBOUGHT_FLOOR = 65.0
+RSI_OVERSOLD_CEILING = 35.0
 ATR_PERIOD = 14
 ATR_VOLATILITY_LOOKBACK = 20
 ATR_VOLATILITY_HIGH_RATIO = 1.25
 ATR_VOLATILITY_LOW_RATIO = 0.75
 ATR_VOLATILITY_HIGH_PCT = 3.5
 ATR_VOLATILITY_LOW_PCT = 1.5
+ATR_PCT_HIGH_FLOOR = 2.5
+ATR_PCT_LOW_CEILING = 2.0
+VOLUME_SPIKE_RATIO_DEFAULT = 1.5
+VOLUME_SHRINK_RATIO_DEFAULT = 0.65
+VOLUME_SPIKE_FLOOR = 1.35
+VOLUME_SHRINK_CEILING = 0.75
 ADX_PERIOD = 14
 ADX_STRONG_THRESHOLD = 25.0
 ADX_WEAK_THRESHOLD = 20.0
@@ -245,6 +255,27 @@ def _threshold_value(thresholds: dict | None, key: str, default: float) -> float
         return default
     value = thresholds.get(key)
     return float(value) if isinstance(value, (int, float)) else default
+
+
+def _clamped_threshold(
+    thresholds: dict | None,
+    key: str,
+    default: float,
+    *,
+    floor: float | None = None,
+    ceiling: float | None = None,
+) -> float:
+    """Resolve a calibrated threshold, then clamp to an absolute band.
+
+    Soft per-stock percentiles (e.g. RSI OB at 54) must not override market-wide
+    meaning of overbought / spike / high vol.
+    """
+    value = _threshold_value(thresholds, key, default)
+    if floor is not None:
+        value = max(value, floor)
+    if ceiling is not None:
+        value = min(value, ceiling)
+    return value
 
 
 def load_base_rates() -> dict | None:
@@ -1113,8 +1144,8 @@ def _volume_anomaly(
     today_volume: int | None,
     avg_volume: int | None,
     *,
-    spike_ratio: float = 1.5,
-    shrink_ratio: float = 0.65,
+    spike_ratio: float = VOLUME_SPIKE_RATIO_DEFAULT,
+    shrink_ratio: float = VOLUME_SHRINK_RATIO_DEFAULT,
 ) -> str:
     if today_volume is None or avg_volume is None or avg_volume <= 0:
         return "unknown"
@@ -1364,8 +1395,18 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         rsi_14 = _rsi_wilder(_closes_from_row_and_history(row, history))
     rsi_zone = _rsi_zone(
         rsi_14,
-        overbought=_threshold_value(thresholds, "rsi_overbought", RSI_OVERBOUGHT),
-        oversold=_threshold_value(thresholds, "rsi_oversold", RSI_OVERSOLD),
+        overbought=_clamped_threshold(
+            thresholds,
+            "rsi_overbought",
+            RSI_OVERBOUGHT,
+            floor=RSI_OVERBOUGHT_FLOOR,
+        ),
+        oversold=_clamped_threshold(
+            thresholds,
+            "rsi_oversold",
+            RSI_OVERSOLD,
+            ceiling=RSI_OVERSOLD_CEILING,
+        ),
     )
 
     atr_14 = _to_float(row.get("ATR14"))
@@ -1381,8 +1422,18 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
         highs,
         lows,
         closes,
-        high_pct=_threshold_value(thresholds, "atr_pct_high", ATR_VOLATILITY_HIGH_PCT),
-        low_pct=_threshold_value(thresholds, "atr_pct_low", ATR_VOLATILITY_LOW_PCT),
+        high_pct=_clamped_threshold(
+            thresholds,
+            "atr_pct_high",
+            ATR_VOLATILITY_HIGH_PCT,
+            floor=ATR_PCT_HIGH_FLOOR,
+        ),
+        low_pct=_clamped_threshold(
+            thresholds,
+            "atr_pct_low",
+            ATR_VOLATILITY_LOW_PCT,
+            ceiling=ATR_PCT_LOW_CEILING,
+        ),
     )
 
     adx_14 = _to_float(row.get("ADX14"))
@@ -1445,15 +1496,15 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     market_ma5_position = _position_from_deviation(market_dev_ma5)
     market_ma20_position = _position_from_deviation(market_dev_ma20)
 
-    # 個股當日漲跌% 由收盤與漲跌點數（spread）反推，供與大盤同基準比較
-    close_price = _to_float(row.get("收盤價"))
-    spread = _to_float(row.get("漲跌幅"))
-    stock_today_pct: float | None = None
-    if close_price is not None and spread is not None:
-        prev_close = close_price - spread
-        if prev_close:
-            stock_today_pct = spread / prev_close * 100.0
-    rs_today = _relative_strength(stock_today_pct, market_change, band=0.5)
+    # 漲跌幅欄位已是百分比（與大盤同基準）。舊 CSV 若仍存 FinMind 點數，
+    # 有前一日收盤時改由 close-to-close 重算，避免雙重換算或沿用錯單位。
+    closes_for_chg = _closes_from_row_and_history(row, history)
+    if len(closes_for_chg) >= 2 and closes_for_chg[-2]:
+        today_change = round(
+            (closes_for_chg[-1] - closes_for_chg[-2]) / closes_for_chg[-2] * 100.0,
+            2,
+        )
+    rs_today = _relative_strength(today_change, market_change, band=0.5)
     rs_period = _relative_strength(period_return, market_period, band=1.0)
 
     margin_short = _margin_short_regime(margin_delta, short_delta)
@@ -1462,8 +1513,18 @@ def build_chip_facts(row: dict, history: list[dict] | None = None) -> ChipFacts:
     volume_flag = _volume_anomaly(
         volume_today,
         avg_volume,
-        spike_ratio=_threshold_value(thresholds, "volume_spike_ratio", 1.5),
-        shrink_ratio=_threshold_value(thresholds, "volume_shrink_ratio", 0.65),
+        spike_ratio=_clamped_threshold(
+            thresholds,
+            "volume_spike_ratio",
+            VOLUME_SPIKE_RATIO_DEFAULT,
+            floor=VOLUME_SPIKE_FLOOR,
+        ),
+        shrink_ratio=_clamped_threshold(
+            thresholds,
+            "volume_shrink_ratio",
+            VOLUME_SHRINK_RATIO_DEFAULT,
+            ceiling=VOLUME_SHRINK_CEILING,
+        ),
     )
     volume_metrics = _volume_metrics_from_row(row, history)
     volume_trend = volume_metrics["volume_trend"]  # type: ignore[assignment]
@@ -1606,6 +1667,101 @@ DIVERGENCE_LABEL = {
 }
 
 
+def _ma_pct_triple(facts: ChipFacts) -> str:
+    """Format close-vs-MA5/10/20 as one parenthetical, or empty if any missing."""
+    parts: list[str] = []
+    for value in (
+        facts.close_vs_ma5_pct,
+        facts.close_vs_ma10_pct,
+        facts.close_vs_ma20_pct,
+    ):
+        if value is None:
+            return ""
+        parts.append(f"{value:+.1f}%")
+    return f"（約 {'／'.join(parts)}）"
+
+
+def _compose_ma_anchor(facts: ChipFacts) -> str | None:
+    """合「收盤相對均線」與「均線彼此排列」為一句，避免 anchors 多句互撞。
+
+    結構化欄位（ma_alignment / ma_stack 等）仍保留給 gate；此函式只負責
+    給模型看的敘事介面。交叉與月線斜率仍由 _build_anchors 另行附加。
+    """
+    align = facts.ma_alignment
+    stack = facts.ma_stack
+    p5, p10, p20 = facts.ma5_position, facts.ma10_position, facts.ma20_position
+
+    if (
+        align in {"unknown", "neutral"}
+        and stack == "unknown"
+        and p5 == "unknown"
+        and p10 == "unknown"
+        and p20 == "unknown"
+    ):
+        return None
+
+    # 價在線上 + 結構糾結 與 價方向不明 + 糾結 語意重疊，合成一句即可。
+    if align == "neutral" and stack == "mixed":
+        return "均線糾結（多空排列未明），短中線方向不明"
+    if align == "neutral" and stack == "unknown":
+        return MA_ALIGNMENT_LABEL["neutral"]
+    if (
+        align in {"unknown", "neutral"}
+        and stack == "mixed"
+        and p5 == "unknown"
+        and p20 == "unknown"
+    ):
+        return MA_STACK_LABEL["mixed"]
+
+    pct = _ma_pct_triple(facts)
+    if p5 == "above" and p10 == "above" and p20 == "above":
+        price = f"收盤站上 MA5／MA10／MA20{pct}，屬價在線上偏多"
+    elif p5 == "below" and p10 == "below" and p20 == "below":
+        price = f"收盤跌破 MA5／MA10／MA20{pct}，屬價在線下偏空"
+    elif align in {"bullish", "bearish", "short_rebound", "short_pullback"}:
+        price = MA_ALIGNMENT_LABEL[align]
+    else:
+        price = None
+
+    price_bullish = align == "bullish" or (
+        p5 == "above" and p20 == "above"
+    )
+    price_bearish = align == "bearish" or (
+        p5 == "below" and p20 == "below"
+    )
+
+    if stack == "bullish_stack":
+        if price_bullish:
+            stack_clause = "且均線多頭排列（MA5 > MA10 > MA20）"
+        elif price_bearish:
+            stack_clause = "惟均線仍為多頭排列，回檔尚未改結構"
+        else:
+            stack_clause = MA_STACK_LABEL["bullish_stack"]
+    elif stack == "bearish_stack":
+        if price_bearish:
+            stack_clause = "且均線空頭排列（MA5 < MA10 < MA20）"
+        elif price_bullish:
+            stack_clause = "惟均線仍為空頭排列，反彈尚未改結構"
+        else:
+            stack_clause = MA_STACK_LABEL["bearish_stack"]
+    elif stack == "mixed":
+        stack_clause = f"惟{MA_STACK_LABEL['mixed']}，結構未齊"
+    else:
+        stack_clause = None
+
+    if price and stack_clause:
+        if stack_clause.startswith("惟"):
+            return f"{price}；{stack_clause}"
+        if stack_clause.startswith("且"):
+            return f"{price}，{stack_clause}"
+        return f"{price}，{stack_clause}"
+    if price:
+        return price
+    if stack_clause:
+        return stack_clause.removeprefix("惟").removeprefix("且")
+    return None
+
+
 def _build_anchors(facts: ChipFacts) -> list[str]:
     anchors: list[str] = []
 
@@ -1636,51 +1792,9 @@ def _build_anchors(facts: ChipFacts) -> list[str]:
     if facts.major_foreign_divergence:
         anchors.append("主力與外資方向背離（籌碼分歧）")
 
-    if facts.ma5_position == "above" and facts.close_vs_ma5_pct is not None:
-        anchors.append(f"收盤高於 MA5 約 {facts.close_vs_ma5_pct:.1f}%")
-    elif facts.ma5_position == "below" and facts.close_vs_ma5_pct is not None:
-        anchors.append(f"收盤低於 MA5 約 {abs(facts.close_vs_ma5_pct):.1f}%")
-
-    if facts.ma10_position == "above" and facts.close_vs_ma10_pct is not None:
-        anchors.append(f"收盤高於 MA10（10 日線）約 {facts.close_vs_ma10_pct:.1f}%")
-    elif facts.ma10_position == "below" and facts.close_vs_ma10_pct is not None:
-        anchors.append(
-            f"收盤低於 MA10（10 日線）約 {abs(facts.close_vs_ma10_pct):.1f}%"
-        )
-
-    if facts.ma20_position == "above" and facts.close_vs_ma20_pct is not None:
-        anchors.append(f"收盤高於 MA20（月線）約 {facts.close_vs_ma20_pct:.1f}%")
-    elif facts.ma20_position == "below" and facts.close_vs_ma20_pct is not None:
-        anchors.append(f"收盤低於 MA20（月線）約 {abs(facts.close_vs_ma20_pct):.1f}%")
-
-    if facts.ma_alignment in {
-        "bullish",
-        "bearish",
-        "short_rebound",
-        "short_pullback",
-    }:
-        anchors.append(MA_ALIGNMENT_LABEL[facts.ma_alignment])
-
-    if facts.ma_short_alignment in {
-        "bullish",
-        "bearish",
-        "short_rebound",
-        "short_pullback",
-    }:
-        anchors.append(MA_SHORT_ALIGN_LABEL[facts.ma_short_alignment])
-
-    if facts.ma_mid_alignment in {
-        "bullish",
-        "bearish",
-        "short_rebound",
-        "short_pullback",
-    }:
-        anchors.append(MA_MID_ALIGN_LABEL[facts.ma_mid_alignment])
-
-    if facts.ma_stack in {"bullish_stack", "bearish_stack"}:
-        anchors.append(MA_STACK_LABEL[facts.ma_stack])
-    elif facts.ma_stack == "mixed":
-        anchors.append(MA_STACK_LABEL["mixed"])
+    ma_anchor = _compose_ma_anchor(facts)
+    if ma_anchor:
+        anchors.append(ma_anchor)
 
     if (
         facts.ma5_cross_ma10 in {"golden", "death"}
@@ -1813,18 +1927,85 @@ _BASE_RATE_LABEL_NAMES = {
 
 _BASE_RATE_MIN_SAMPLE_DEFAULT = 20
 
+# 表格／prompt 標題：避免「命中率／勝率」讓人以為是絕對上漲勝率。
+BASE_RATE_TITLE = "歷史 forward 對照（相對大盤超額）"
+
+# ±此區間內的綜合傾向視為「中性」，避免噪音級數字被讀成方向訊號。
+BASE_RATE_TILT_BAND = 0.3
+
+# |桶 p_up − 全市場同 horizon p_up| 低於此（比例，非百分點）→ 贏大盤占比無明顯邊緣。
+BASE_RATE_HIT_EDGE_BAND = 0.03
+
 
 def _base_rate_confidence(n: int, min_sample: int) -> str:
     """信心等級標註。
 
     小樣本桶已被 shrinkage 拉回全市場先驗，數字本身不具統計效力；此標註讓報告
-    誠實揭露可信度，避免把 n 很小的桶當成可靠勝率使用。
+    誠實揭露可信度，避免把 n 很小的桶當成可靠方向優勢。
     """
     if n >= min_sample:
         return "樣本充足"
     if n >= max(1, min_sample // 2):
         return "樣本偏少"
     return "樣本不足"
+
+
+def _global_horizon_stat(
+    base_rates: dict | None, slot: str, field: str
+) -> float | None:
+    if not isinstance(base_rates, dict):
+        return None
+    global_stats = base_rates.get("global")
+    if not isinstance(global_stats, dict):
+        return None
+    row = global_stats.get(slot)
+    if not isinstance(row, dict):
+        return None
+    value = row.get(field)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def p_up_has_edge_vs_global(
+    p_up: float,
+    global_p_up: float | None,
+    *,
+    band: float = BASE_RATE_HIT_EDGE_BAND,
+) -> bool:
+    """True when bucket hit-rate clearly differs from the all-market baseline."""
+    if global_p_up is None:
+        return True
+    return abs(float(p_up) - float(global_p_up)) >= band
+
+
+def _format_horizon_for_prompt(
+    slot: str,
+    *,
+    p_up: float,
+    mean: float,
+    n: int,
+    confidence: str,
+    global_p_up: float | None,
+) -> str:
+    """Lead with mean excess; downgrade hit-rate wording when it has no edge."""
+    excess = f"平均超額 {mean:+.1f}%"
+    if not p_up_has_edge_vs_global(p_up, global_p_up):
+        baseline = (
+            f"，近全市場基準 {global_p_up * 100:.0f}%"
+            if global_p_up is not None
+            else ""
+        )
+        hit = f"贏大盤占比無明顯邊緣（{p_up * 100:.0f}%{baseline}）"
+    elif global_p_up is not None:
+        delta_pt = (p_up - global_p_up) * 100
+        hit = f"贏大盤占比 {p_up * 100:.0f}%（相對基準 {delta_pt:+.0f}pt）"
+    else:
+        hit = f"贏大盤占比 {p_up * 100:.0f}%"
+    return f"{slot} {excess}、{hit}（n={n}，{confidence}）"
 
 
 def format_base_rates_for_prompt(
@@ -1834,7 +2015,9 @@ def format_base_rates_for_prompt(
     """Lines describing how this stock's *current* regimes fared historically.
 
     Uses shrunk statistics so tiny buckets don't over-claim; empty when the
-    calibration file is missing or no matching bucket has data.
+    calibration file is missing or no matching bucket has data. Mean excess is
+    listed first; hit-rate (p_up) is labeled 贏大盤占比 and marked「無明顯邊緣」
+    when near the all-market baseline.
     """
     if not base_rates:
         return []
@@ -1867,16 +2050,68 @@ def format_base_rates_for_prompt(
                 continue
             confidence = _base_rate_confidence(n, min_sample)
             parts.append(
-                f"{slot} 上漲機率 {p_up * 100:.0f}%、平均超額 {mean:+.1f}%"
-                f"（n={n}，{confidence}）"
+                _format_horizon_for_prompt(
+                    slot,
+                    p_up=float(p_up),
+                    mean=float(mean),
+                    n=n,
+                    confidence=confidence,
+                    global_p_up=_global_horizon_stat(base_rates, slot, "p_up"),
+                )
             )
         if parts:
             lines.append(f"- {name}={value}：" + "；".join(parts))
     return lines
 
 
-# ±此區間內的綜合傾向視為「中性」，避免噪音級數字被讀成方向訊號。
-BASE_RATE_TILT_BAND = 0.3
+def base_rate_hit_rate_has_edge(
+    facts,
+    base_rates: dict | None = None,
+    *,
+    min_sample: int | None = None,
+) -> bool | None:
+    """Whether any sufficient-sample bucket's p_up clearly differs from global.
+
+    ``None`` when there is no usable horizon; ``False`` when all checked
+    horizons sit within ``BASE_RATE_HIT_EDGE_BAND`` of the all-market baseline.
+    """
+    if base_rates is None:
+        base_rates = load_base_rates()
+    if not base_rates:
+        return None
+    buckets = base_rates.get("buckets", {})
+    if not isinstance(buckets, dict):
+        return None
+    if min_sample is None:
+        min_sample = int(
+            base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
+            or _BASE_RATE_MIN_SAMPLE_DEFAULT
+        )
+    saw_any = False
+    for key in _BASE_RATE_LABEL_NAMES:
+        value = getattr(facts, key, "unknown")
+        if value in (None, "", "unknown"):
+            continue
+        stats = buckets.get(key, {}).get(str(value))
+        if not isinstance(stats, dict):
+            continue
+        for slot in ("3d", "5d"):
+            horizon = stats.get(slot)
+            if not isinstance(horizon, dict):
+                continue
+            n = int(horizon.get("n", 0) or 0)
+            if n < min_sample:
+                continue
+            p_up = horizon.get("p_up_shrunk", horizon.get("p_up"))
+            if p_up is None:
+                continue
+            saw_any = True
+            baseline = _global_horizon_stat(base_rates, slot, "p_up")
+            if p_up_has_edge_vs_global(float(p_up), baseline):
+                return True
+    if not saw_any:
+        return None
+    return False
 
 
 def base_rate_tilt_label(edge: float | None) -> str:
@@ -1990,19 +2225,80 @@ def _base_rate_sample_note(base_rates: dict | None) -> str | None:
     mret, pup = ref.get("mean_return"), ref.get("p_up")
     regime_txt = _REGIME_TEXT.get(regime, regime)
     if mret is not None and pup is not None:
-        regime_txt = f"{regime}（5 日均 {mret:+.1f}%、上漲 {pup * 100:.0f}%）"
+        # sample.market p_up is absolute price-up rate; table p_up is excess>0 rate.
+        regime_txt = f"{regime}（5 日均 {mret:+.1f}%、絕對上漲占比 {pup * 100:.0f}%）"
     return (
-        f"{head}樣本期大盤{regime_txt}。數字為相對大盤超額、"
-        "已對小樣本收縮，屬「該市場環境下」的條件機率——"
+        f"{head}樣本期大盤{regime_txt}。下表為相對大盤超額（非絕對漲跌勝率）、"
+        "已對小樣本收縮；方向判斷優先看平均超額，贏大盤占比若標「無明顯邊緣」"
+        "不可寫成歷史優勢——"
         "**與技術面/動能判讀衝突時以動能為準**、非保證。"
     )
+
+
+def _horizon_payload(
+    raw: object, *, global_p_up: float | None
+) -> dict[str, object]:
+    if not isinstance(raw, dict) or int(raw.get("n", 0) or 0) <= 0:
+        return {
+            "p_up": None,
+            "excess": None,
+            "n": 0,
+            "hit_edge": None,
+        }
+    p_up = raw.get("p_up_shrunk", raw.get("p_up"))
+    excess = raw.get("mean_excess_shrunk", raw.get("mean_excess"))
+    p_up_f = float(p_up) if p_up is not None else None
+    hit_edge = (
+        p_up_has_edge_vs_global(p_up_f, global_p_up) if p_up_f is not None else None
+    )
+    return {
+        "p_up": p_up_f,
+        "excess": float(excess) if excess is not None else None,
+        "n": int(raw.get("n", 0) or 0),
+        "hit_edge": hit_edge,
+    }
+
+
+def _tilt_footer_lines(
+    facts,
+    base_rates: dict,
+    *,
+    min_sample: int,
+) -> list[str]:
+    edge = base_rate_forward_edge(facts, base_rates, min_sample=min_sample)
+    if edge is None:
+        return []
+    tilt = base_rate_tilt_label(edge)
+    sample = base_rates.get("sample") if isinstance(base_rates, dict) else None
+    regime = sample.get("regime") if isinstance(sample, dict) else None
+    regime_clause = (
+        f"；樣本以「大盤{regime}」環境為主，遇明確反向趨勢時本傾向可能失效"
+        if regime in ("偏多", "偏空", "震盪")
+        else ""
+    )
+    hit_edge = base_rate_hit_rate_has_edge(
+        facts, base_rates, min_sample=min_sample
+    )
+    hit_clause = ""
+    if hit_edge is False:
+        hit_clause = (
+            "；贏大盤占比多無明顯邊緣，**勿寫成勝率／上漲機率優勢**，"
+            "方向只可依平均超額弱化表述"
+        )
+    return [
+        "",
+        "**綜合歷史傾向：** 扣除全市場同期基準後，樣本充足桶**平均 forward 超額** "
+        f"{edge:+.2f}% → {tilt}（依超額而非贏大盤占比；"
+        f"中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；已納入操作情境權重"
+        f"{regime_clause}{hit_clause}）",
+    ]
 
 
 def build_base_rate_table_payload(
     facts,
     base_rates: dict | None = None,
 ) -> dict | None:
-    """Structured hit-rate block for the website data tab (same numbers as Markdown)."""
+    """Structured forward-excess block for the website data tab (same as Markdown)."""
     if base_rates is None:
         base_rates = load_base_rates()
     if not base_rates:
@@ -2014,17 +2310,8 @@ def build_base_rate_table_payload(
         base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
         or _BASE_RATE_MIN_SAMPLE_DEFAULT
     )
-
-    def _horizon(raw: object) -> dict[str, object]:
-        if not isinstance(raw, dict) or int(raw.get("n", 0) or 0) <= 0:
-            return {"p_up": None, "excess": None, "n": 0}
-        p_up = raw.get("p_up_shrunk", raw.get("p_up"))
-        excess = raw.get("mean_excess_shrunk", raw.get("mean_excess"))
-        return {
-            "p_up": float(p_up) if p_up is not None else None,
-            "excess": float(excess) if excess is not None else None,
-            "n": int(raw.get("n", 0) or 0),
-        }
+    g3 = _global_horizon_stat(base_rates, "3d", "p_up")
+    g5 = _global_horizon_stat(base_rates, "5d", "p_up")
 
     rows: list[dict[str, object]] = []
     for key, name in _BASE_RATE_LABEL_NAMES.items():
@@ -2034,7 +2321,8 @@ def build_base_rate_table_payload(
         stats = buckets.get(key, {}).get(str(value))
         if not isinstance(stats, dict):
             continue
-        h3, h5 = _horizon(stats.get("3d")), _horizon(stats.get("5d"))
+        h3 = _horizon_payload(stats.get("3d"), global_p_up=g3)
+        h5 = _horizon_payload(stats.get("5d"), global_p_up=g5)
         n = max(int(h3["n"] or 0), int(h5["n"] or 0))
         if n <= 0:
             continue
@@ -2053,22 +2341,37 @@ def build_base_rate_table_payload(
         return None
 
     payload: dict[str, object] = {
-        "title": "歷史命中率（同型態個股 forward 表現）",
+        "title": BASE_RATE_TITLE,
         "note": _base_rate_sample_note(base_rates)
         or (
-            "依系統 regime 標籤對照回測樣本；已對小樣本收縮，"
+            "依系統 regime 標籤對照回測樣本；已對小樣本收縮；"
+            "方向優先看平均超額，贏大盤占比無邊緣時勿寫成優勢；"
             "與技術面/動能判讀衝突時以動能為準，僅供情境權重參考、非保證。"
         ),
         "rows": rows,
+        "columns": {
+            "p_up": "贏大盤占比",
+            "excess": "平均超額",
+        },
     }
+    hit_edge = base_rate_hit_rate_has_edge(
+        facts, base_rates, min_sample=min_sample
+    )
+    if hit_edge is not None:
+        payload["hit_rate_has_edge"] = hit_edge
     edge = base_rate_forward_edge(facts, base_rates, min_sample=min_sample)
     if edge is not None:
         tilt = base_rate_tilt_label(edge)
         sample = base_rates.get("sample") if isinstance(base_rates, dict) else None
         regime = sample.get("regime") if isinstance(sample, dict) else None
-        tilt_note = f"中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；已納入操作情境權重"
+        tilt_note = (
+            f"依平均超額（非贏大盤占比）；中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；"
+            "已納入操作情境權重"
+        )
         if regime in ("偏多", "偏空", "震盪"):
             tilt_note += f"；樣本以「大盤{regime}」環境為主，遇明確反向趨勢時本傾向可能失效"
+        if hit_edge is False:
+            tilt_note += "；贏大盤占比多無明顯邊緣，勿寫成勝率優勢"
         payload["edge"] = edge
         payload["tilt"] = tilt
         payload["tilt_note"] = tilt_note
@@ -2079,7 +2382,7 @@ def build_base_rate_table_markdown(
     facts,
     base_rates: dict | None = None,
 ) -> str | None:
-    """Deterministic Markdown block of this stock's regime hit-rates.
+    """Deterministic Markdown block of this stock's regime forward excess.
 
     Rendered directly by the report (independent of the LLM) so the historical
     edge is *visible*, not just whispered into the prompt.
@@ -2095,12 +2398,19 @@ def build_base_rate_table_markdown(
         base_rates.get("min_bucket_sample", _BASE_RATE_MIN_SAMPLE_DEFAULT)
         or _BASE_RATE_MIN_SAMPLE_DEFAULT
     )
+    g3 = _global_horizon_stat(base_rates, "3d", "p_up")
+    g5 = _global_horizon_stat(base_rates, "5d", "p_up")
 
-    def _p(horizon: dict | None) -> str:
+    def _p(horizon: dict | None, global_p_up: float | None) -> str:
         if not isinstance(horizon, dict) or int(horizon.get("n", 0) or 0) <= 0:
             return "—"
         p_up = horizon.get("p_up_shrunk", horizon.get("p_up"))
-        return f"{p_up * 100:.0f}%" if p_up is not None else "—"
+        if p_up is None:
+            return "—"
+        pct = f"{float(p_up) * 100:.0f}%"
+        if not p_up_has_edge_vs_global(float(p_up), global_p_up):
+            return f"{pct}≈"
+        return pct
 
     def _e(horizon: dict | None) -> str:
         if not isinstance(horizon, dict) or int(horizon.get("n", 0) or 0) <= 0:
@@ -2125,42 +2435,28 @@ def build_base_rate_table_markdown(
             continue
         confidence = _base_rate_confidence(n, min_sample)
         rows.append(
-            f"| {name} | {value} | {_p(h3)} | {_e(h3)} | {_p(h5)} | {_e(h5)} "
+            f"| {name} | {value} | {_e(h3)} | {_p(h3, g3)} | {_e(h5)} | {_p(h5, g5)} "
             f"| n={n}（{confidence}） |"
         )
     if not rows:
         return None
 
     note = _base_rate_sample_note(base_rates) or (
-        "依系統 regime 標籤對照回測樣本；已對小樣本收縮，"
+        "依系統 regime 標籤對照回測樣本；已對小樣本收縮；"
+        "方向優先看平均超額，贏大盤占比旁「≈」表示近全市場基準、無明顯邊緣；"
         "與技術面/動能判讀衝突時以動能為準，僅供情境權重參考、非保證。"
     )
     lines = [
-        "### 歷史命中率（同型態個股 forward 表現）",
+        f"### {BASE_RATE_TITLE}",
         f"> {note}",
         "",
-        "| 維度 | 當前狀態 | 3日勝率 | 3日超額 | 5日勝率 | 5日超額 | 樣本(信心) |",
+        "| 維度 | 當前狀態 | 3日平均超額 | 3日贏大盤占比 | 5日平均超額 | 5日贏大盤占比 | 樣本(信心) |",
         "| --- | --- | --- | --- | --- | --- | --- |",
         *rows,
+        "",
+        "> 「≈」＝贏大盤占比近全市場基準（無明顯邊緣），不可寫成勝率優勢。",
+        *_tilt_footer_lines(facts, base_rates, min_sample=min_sample),
     ]
-    edge = base_rate_forward_edge(facts, base_rates, min_sample=min_sample)
-    if edge is not None:
-        tilt = base_rate_tilt_label(edge)
-        sample = base_rates.get("sample") if isinstance(base_rates, dict) else None
-        regime = sample.get("regime") if isinstance(sample, dict) else None
-        regime_clause = (
-            f"；樣本以「大盤{regime}」環境為主，遇明確反向趨勢時本傾向可能失效"
-            if regime in ("偏多", "偏空", "震盪")
-            else ""
-        )
-        lines.extend(
-            [
-                "",
-                "**綜合歷史傾向：** 扣除全市場同期基準後，樣本充足桶平均 forward 超額 "
-                f"{edge:+.2f}% → {tilt}（中性帶 ±{BASE_RATE_TILT_BAND:.1f}%；已納入操作情境權重"
-                f"{regime_clause}）",
-            ]
-        )
     return "\n".join(lines)
 
 
@@ -2352,12 +2648,13 @@ def facts_summary_for_prompt(
         lines.extend(
             [
                 "",
-                "【歷史命中率（同型態個股過去 forward 表現，僅供情境權重參考，"
-                "非保證；已對小樣本做收縮）。每項標註信心等級：樣本充足＞樣本偏少"
-                "＞樣本不足；『樣本不足／偏少』者數字已大幅收縮回全市場平均，"
-                "不可當成可靠勝率，敘述須弱化其權重。此為回測樣本市場環境下的"
-                "條件機率，與技術面/動能方向衝突時一律以技術面/動能為準，"
-                "勿讓命中率蓋過空頭結構判讀】",
+                "【歷史 forward 對照（同型態個股相對大盤超額，僅供情境權重參考，"
+                "非保證；已對小樣本做收縮）。每項先看平均超額，再看贏大盤占比；"
+                "若標「無明顯邊緣」禁止寫成勝率／上漲機率優勢。"
+                "信心等級：樣本充足＞樣本偏少＞樣本不足；"
+                "『樣本不足／偏少』者已大幅收縮回全市場平均，敘述須弱化。"
+                "與技術面/動能方向衝突時一律以技術面/動能為準，"
+                "勿讓歷史占比蓋過空頭結構判讀】",
             ]
         )
         sample_note = _base_rate_sample_note(base_rates)

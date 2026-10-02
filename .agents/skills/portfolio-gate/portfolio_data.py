@@ -41,7 +41,14 @@ def resolve_trade_date(explicit: str | None) -> str | None:
 
 
 def csv_path(trade_date: str, stock_id: str) -> Path:
-    return stock_root() / trade_date / f"tw_stock_{stock_id}.csv"
+    ensure_import_paths()
+    from stock_paths import find_stock_csv, stock_csv_path
+
+    found = find_stock_csv(stock_id, trade_date, root=project_root())
+    if found is not None:
+        return found
+    # Canonical write / expected path when absent
+    return stock_csv_path(trade_date, stock_id, root=project_root(), mkdir=False)
 
 
 def output_dir(trade_date: str) -> Path:

@@ -290,7 +290,7 @@ def build_history_table_markdown(history_rows: list[dict[str, str]]) -> str | No
             [
                 _cell(row.get("日期", "")),
                 _fmt_num(row.get("收盤價", "")),
-                _fmt_num(row.get("漲跌幅", ""), signed=True),
+                _fmt_pct(row.get("漲跌幅", "")),
                 _fmt_num(row.get("成交量_張", "")),
                 _fmt_num(row.get("外資買賣超_張", ""), signed=True),
                 _fmt_num(row.get("投信買賣超_張", ""), signed=True),
@@ -309,7 +309,7 @@ def build_history_table_markdown(history_rows: list[dict[str, str]]) -> str | No
                 [
                     "日期",
                     "收盤",
-                    "漲跌(元)",
+                    "漲跌幅%",
                     "成交量",
                     "外資",
                     "投信",
@@ -347,7 +347,7 @@ def build_chip_tables_markdown(
                 ["最高價", _fmt_num(row.get("最高價", ""))],
                 ["最低價", _fmt_num(row.get("最低價", ""))],
                 ["收盤價", _fmt_num(row.get("收盤價", ""))],
-                ["漲跌幅", _fmt_num(row.get("漲跌幅", ""), signed=True)],
+                ["漲跌幅", _fmt_pct(row.get("漲跌幅", ""))],
                 ["成交量（張）", _fmt_num(row.get("成交量_張", ""))],
             ],
         ),

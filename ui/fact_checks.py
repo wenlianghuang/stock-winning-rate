@@ -170,12 +170,14 @@ RSI_OVERBOUGHT_PHRASES = (
     "RSI偏高",
     "RSI過熱",
     "動能過熱",
+    "相對自身偏高",
     "超買區",
 )
 RSI_OVERSOLD_PHRASES = (
     "RSI超賣",
     "RSI偏低",
     "動能偏弱",
+    "相對自身偏低",
     "超賣區",
 )
 VOLATILITY_HIGH_PHRASES = (
@@ -782,7 +784,7 @@ def run_fact_checks(
             issues.append(
                 (
                     "fact_rsi_zone_mismatch",
-                    f"facts 判定 RSI 偏高（動能過熱），"
+                    f"facts 判定 RSI 偏高（相對／絕對偏高），"
                     f"正文卻描述「{oversold}」，與 RSI 動能矛盾",
                 )
             )
@@ -790,7 +792,7 @@ def run_fact_checks(
             issues.append(
                 (
                     "fact_rsi_zone_mismatch",
-                    f"facts 判定 RSI 偏低（動能偏弱），"
+                    f"facts 判定 RSI 偏低（相對／絕對偏低），"
                     f"正文卻描述「{overbought}」，與 RSI 動能矛盾",
                 )
             )

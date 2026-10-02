@@ -10,7 +10,7 @@ TAIEX market context is fetched once the same way, then sliced per date via
 ``market_context_from_rows``.
 
 Output matches what ``outcome_label`` + ``calibrate_thresholds`` consume:
-``reports/stock/{date}/tw_stock_{id}.csv`` (snapshot) and ``..._history.csv``.
+``reports/stock/{date}/{id}/tw_stock_{id}.csv`` (snapshot) and ``..._history.csv``.
 
 No look-ahead: every per-date snapshot only uses data on or before that date
 (trailing series are sliced with ``end_date=d``).

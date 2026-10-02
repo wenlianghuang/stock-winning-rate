@@ -5,18 +5,27 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
 
-from chip_signals import build_chip_facts  # noqa: E402
+from chip_signals import (  # noqa: E402
+    BASE_RATE_TITLE,
+    build_base_rate_table_markdown,
+    build_chip_facts,
+    format_base_rates_for_prompt,
+    p_up_has_edge_vs_global,
+    base_rate_hit_rate_has_edge,
+)
 from fact_checks import run_fact_checks  # noqa: E402
 
 
 def _row(**overrides) -> dict[str, str]:
     base = {
-        "代碼": "2409",
-        "名稱": "友達",
+        # Avoid real calibration files under reports/calibration/ (e.g. 2409).
+        "代碼": "9998",
+        "名稱": "測試股",
         "日期": "2026-07-06",
         "外資買賣超_張": "500",
         "投信買賣超_張": "200",
@@ -223,6 +232,40 @@ class ChipSignalsTests(unittest.TestCase):
     def test_ma_stack_mixed_when_interleaved(self) -> None:
         facts = build_chip_facts(_row(MA5="31.0", MA10="30.0", MA20="30.5"))
         self.assertEqual(facts.ma_stack, "mixed")
+
+    def test_ma_anchor_synthesizes_price_and_stack(self) -> None:
+        # 價在三線上 + 多頭排列 → 一句同時寫價與結構，不再拆成多條
+        facts = build_chip_facts(_row())
+        self.assertEqual(facts.ma_alignment, "bullish")
+        self.assertEqual(facts.ma_stack, "bullish_stack")
+        ma_anchors = [
+            a
+            for a in facts.anchors
+            if "MA5" in a or "均線" in a or "短中線" in a
+        ]
+        # 交叉／斜率另計；價位+排列應合成恰好一句含兩者
+        composed = [
+            a
+            for a in ma_anchors
+            if "價在線上" in a or "站上 MA5" in a or "多頭排列" in a
+        ]
+        self.assertEqual(len(composed), 1, composed)
+        self.assertIn("多頭排列", composed[0])
+        self.assertIn("價在線上", composed[0])
+        # 舊版會分別 append 的碎片不應再出現
+        self.assertFalse(any(a.startswith("收盤高於 MA5 約") for a in facts.anchors))
+        self.assertNotIn("短中線同步偏多（收盤站上 MA5 與 MA20）", facts.anchors)
+
+    def test_ma_anchor_reconciles_bullish_price_with_mixed_stack(self) -> None:
+        # 2330 類情境：站上三線但均線糾結 → 一句和解，避免「偏多」與「糾結」分列
+        facts = build_chip_facts(_row(MA5="31.0", MA10="30.0", MA20="30.5"))
+        self.assertEqual(facts.ma_alignment, "bullish")
+        self.assertEqual(facts.ma_stack, "mixed")
+        composed = [a for a in facts.anchors if "糾結" in a or "價在線上" in a]
+        self.assertEqual(len(composed), 1, composed)
+        self.assertIn("價在線上", composed[0])
+        self.assertIn("多空排列未明", composed[0])
+        self.assertNotIn("均線糾結（多空排列未明）", facts.anchors)  # 不再單獨一條
 
     def test_ma_stack_unknown_without_ma_values(self) -> None:
         row = _row()
@@ -472,9 +515,62 @@ class RsiSignalsTests(unittest.TestCase):
 
     def test_rsi_zone_consistent_passes(self) -> None:
         facts = build_chip_facts(_row(**{"RSI14": "75.0"}))
-        body = "## 近 N 日籌碼趨勢\nRSI 偏高，動能過熱，留意回檔。\n"
+        body = "## 近 N 日籌碼趨勢\nRSI 偏高，相對自身／絕對偏高，留意回檔。\n"
         codes = [c for c, _ in run_fact_checks(body, facts)]
         self.assertNotIn("fact_rsi_zone_mismatch", codes)
+
+    def test_soft_calibrated_rsi_clamped_to_absolute_floor(self) -> None:
+        import chip_signals as cs
+
+        cs._STOCK_THRESHOLD_CACHE.clear()
+        soft = {
+            "n_rsi": 45,
+            "rsi_overbought": 54.43,
+            "rsi_oversold": 46.48,
+            "atr_pct_high": 3.06,
+            "atr_pct_low": 2.01,
+            "volume_spike_ratio": 1.19,
+            "volume_shrink_ratio": 0.6,
+        }
+        try:
+            with mock.patch.object(
+                cs, "_load_stock_thresholds", return_value=soft
+            ):
+                mid = build_chip_facts(_row(**{"代碼": "2330", "RSI14": "59.5"}))
+                self.assertEqual(mid.rsi_zone, "neutral")
+                hot = build_chip_facts(_row(**{"代碼": "2330", "RSI14": "66.0"}))
+                self.assertEqual(hot.rsi_zone, "overbought")
+                cold = build_chip_facts(_row(**{"代碼": "2330", "RSI14": "34.0"}))
+                self.assertEqual(cold.rsi_zone, "oversold")
+        finally:
+            cs._STOCK_THRESHOLD_CACHE.clear()
+
+    def test_soft_calibrated_volume_spike_clamped(self) -> None:
+        import chip_signals as cs
+
+        cs._STOCK_THRESHOLD_CACHE.clear()
+        soft = {
+            "n_rsi": 45,
+            "rsi_overbought": 70.0,
+            "rsi_oversold": 30.0,
+            "volume_spike_ratio": 1.19,
+            "volume_shrink_ratio": 0.6,
+        }
+        try:
+            with mock.patch.object(
+                cs, "_load_stock_thresholds", return_value=soft
+            ):
+                # 1.25x is above soft 1.19 but below floor 1.35 → normal
+                mild = build_chip_facts(
+                    _row(**{"代碼": "2330", "成交量_張": "12500", "區間成交量均值_張": "10000"})
+                )
+                self.assertEqual(mild.volume_anomaly, "normal")
+                strong = build_chip_facts(
+                    _row(**{"代碼": "2330", "成交量_張": "14000", "區間成交量均值_張": "10000"})
+                )
+                self.assertEqual(strong.volume_anomaly, "spike")
+        finally:
+            cs._STOCK_THRESHOLD_CACHE.clear()
 
 
 class AtrSignalsTests(unittest.TestCase):
@@ -675,6 +771,94 @@ class MarketContextTests(unittest.TestCase):
         body = "## 當日籌碼解讀\n個股走勢弱於大盤，相對弱勢。\n"
         codes = [c for c, _ in run_fact_checks(body, facts)]
         self.assertNotIn("fact_market_rs_mismatch", codes)
+
+    def test_today_change_pct_is_percent_not_points(self) -> None:
+        # CSV 漲跌幅 already percent (after fetch fix); no history → trust field.
+        facts = build_chip_facts(
+            self._market_row(**{"漲跌幅": "0.81", "收盤價": "2500"})
+        )
+        self.assertAlmostEqual(facts.today_change_pct or 0, 0.81)
+        self.assertEqual(facts.rs_today, "inline")  # 0.81 vs market 0.5, band 0.5
+
+    def test_today_change_pct_recomputed_from_closes_for_legacy_csv(self) -> None:
+        # Legacy CSV stored FinMind point spread (20) as 漲跌幅; recompute from closes.
+        row = self._market_row(**{"漲跌幅": "20", "收盤價": "2500"})
+        history = [{"收盤價": "2480"}]
+        facts = build_chip_facts(row, history)
+        self.assertAlmostEqual(facts.today_change_pct or 0, round(20 / 2480 * 100, 2))
+        self.assertNotEqual(facts.today_change_pct, 20.0)
+
+
+class BaseRateWordingTests(unittest.TestCase):
+    def _rates(self, *, p_up: float = 0.42, mean: float = 0.5) -> dict:
+        return {
+            "min_bucket_sample": 20,
+            "global": {
+                "3d": {"p_up": 0.42, "mean_excess": 0.2},
+                "5d": {"p_up": 0.43, "mean_excess": 0.4},
+            },
+            "buckets": {
+                "chip_regime": {
+                    "accumulation": {
+                        "3d": {
+                            "n": 40,
+                            "p_up_shrunk": p_up,
+                            "mean_excess_shrunk": mean,
+                        },
+                        "5d": {
+                            "n": 40,
+                            "p_up_shrunk": p_up,
+                            "mean_excess_shrunk": mean,
+                        },
+                    }
+                }
+            },
+        }
+
+    def test_p_up_edge_band(self) -> None:
+        self.assertFalse(p_up_has_edge_vs_global(0.42, 0.42))
+        self.assertFalse(p_up_has_edge_vs_global(0.44, 0.42))  # 2pt < 3pt band
+        self.assertTrue(p_up_has_edge_vs_global(0.46, 0.42))
+
+    def test_prompt_leads_with_excess_and_marks_no_edge(self) -> None:
+        facts = build_chip_facts(_row())
+        # Force regime that matches our stub bucket.
+        object.__setattr__(facts, "chip_regime", "accumulation")
+        lines = format_base_rates_for_prompt(facts, self._rates(p_up=0.42, mean=0.7))
+        joined = "\n".join(lines)
+        self.assertIn("平均超額 +0.7%", joined)
+        self.assertIn("贏大盤占比無明顯邊緣", joined)
+        self.assertNotIn("上漲機率", joined)
+        self.assertNotIn("勝率", joined)
+
+    def test_prompt_shows_hit_edge_when_separated(self) -> None:
+        facts = build_chip_facts(_row())
+        object.__setattr__(facts, "chip_regime", "accumulation")
+        lines = format_base_rates_for_prompt(facts, self._rates(p_up=0.55, mean=0.7))
+        joined = "\n".join(lines)
+        self.assertIn("贏大盤占比 55%", joined)
+        self.assertIn("相對基準", joined)
+        self.assertNotIn("無明顯邊緣", joined)
+
+    def test_markdown_column_order_and_approx_marker(self) -> None:
+        facts = build_chip_facts(_row())
+        object.__setattr__(facts, "chip_regime", "accumulation")
+        md = build_base_rate_table_markdown(facts, self._rates(p_up=0.42, mean=0.7))
+        self.assertIsNotNone(md)
+        assert md is not None
+        self.assertIn(BASE_RATE_TITLE, md)
+        self.assertIn("3日平均超額", md)
+        self.assertIn("3日贏大盤占比", md)
+        self.assertNotIn("| 3日勝率 |", md)
+        self.assertIn("42%≈", md)
+        self.assertIn("依平均超額", md)
+        self.assertIn("勿寫成勝率", md)
+        self.assertTrue(
+            base_rate_hit_rate_has_edge(
+                facts, self._rates(p_up=0.42), min_sample=20
+            )
+            is False
+        )
 
 
 if __name__ == "__main__":

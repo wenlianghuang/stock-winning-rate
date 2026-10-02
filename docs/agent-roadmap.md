@@ -40,7 +40,7 @@
 
 | 能力 | 入口 | 產物 |
 |------|------|------|
-| 籌碼抓取 | `tw-stock-report/fetch_chip_report.py` | `reports/stock/{日期}/tw_stock_{代碼}.csv` |
+| 籌碼抓取 | `tw-stock-report/fetch_chip_report.py` | `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.csv` |
 | 個股深度報告閉環 | `report-gate/report_gate.py` | `.md` / `.facts.json` / `.gate.log` |
 | 持股部位閉環 | `position-gate/position_gate.py` | `_position.md` / `.position.facts.json` |
 | 投組規則 + 敘事 | `portfolio-gate/` | `reports/portfolio/` |

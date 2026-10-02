@@ -32,10 +32,16 @@ def iter_log_files(date: str | None) -> tuple[list[Path], list[Path]]:
     root = stock_root()
     if not root.exists():
         return [], []
-    pattern = f"{date}/*.gate.log" if date else "*/*.gate.log"
-    all_logs = sorted(root.glob(pattern))
+    sys.path.insert(0, str(project_root() / "ui"))
+    from stock_paths import iter_stock_artifacts
+
+    all_logs = iter_stock_artifacts(name_glob="*.gate.log", trade_date=date, root=project_root())
     position_logs = [p for p in all_logs if p.name.endswith(".position.gate.log")]
-    report_logs = [p for p in all_logs if not p.name.endswith(".position.gate.log")]
+    report_logs = [
+        p
+        for p in all_logs
+        if p.name.endswith(".gate.log") and not p.name.endswith(".position.gate.log")
+    ]
     return report_logs, position_logs
 
 

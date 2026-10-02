@@ -206,12 +206,12 @@ def classify_intent(text: str) -> ClassifiedIntent:
 
 
 def chip_csv_missing(stock_id: str, trade_date: str | None) -> bool:
-    stock_root = ROOT / "reports" / "stock"
-    if trade_date:
-        return not (stock_root / trade_date / f"tw_stock_{stock_id}.csv").exists()
-    if not stock_root.exists():
-        return True
-    return not any(stock_root.glob(f"*/tw_stock_{stock_id}.csv"))
+    from agent.tools._paths import ensure_paths
+
+    ensure_paths()
+    from stock_paths import find_stock_csv
+
+    return find_stock_csv(stock_id, trade_date, root=ROOT) is None
 
 
 def daily_facts_exist(trade_date: str | None) -> bool:
@@ -222,13 +222,20 @@ def daily_facts_exist(trade_date: str | None) -> bool:
 
 
 def research_facts_exist(stock_id: str, trade_date: str | None) -> bool:
-    stock_root = ROOT / "reports" / "stock"
-    name = f"tw_stock_{stock_id}.facts.json"
-    if trade_date:
-        return (stock_root / trade_date / name).is_file()
-    if not stock_root.exists():
-        return False
-    return any(stock_root.glob(f"*/{name}"))
+    from agent.tools._paths import ensure_paths
+
+    ensure_paths()
+    from stock_paths import find_stock_artifact
+
+    return (
+        find_stock_artifact(
+            stock_id,
+            f"tw_stock_{stock_id}.facts.json",
+            trade_date=trade_date,
+            root=ROOT,
+        )
+        is not None
+    )
 
 
 def plan_to_dict(plan: Plan) -> dict[str, Any]:

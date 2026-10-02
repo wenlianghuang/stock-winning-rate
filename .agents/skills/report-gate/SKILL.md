@@ -31,7 +31,7 @@ python3 .agents/skills/report-gate/report_gate.py 2409
 python3 .agents/skills/report-gate/report_gate.py 2409 --date 2026-07-02
 
 # 直接指定 CSV
-python3 .agents/skills/report-gate/report_gate.py --csv reports/stock/2026-07-02/tw_stock_2409.csv
+python3 .agents/skills/report-gate/report_gate.py --csv reports/stock/2026-07-02/2409/tw_stock_2409.csv
 
 # 只驗證既有 .md，不呼叫 agy
 python3 .agents/skills/report-gate/report_gate.py 2409 --validate-only
@@ -59,11 +59,11 @@ Chat UI：`/gate 2409` 或 `/report-gate 2409`
 
 ## Output
 
-- `reports/stock/{日期}/tw_stock_{代碼}.md`（**敘事正文**；籌碼表不寫入 md）
-- `reports/stock/{日期}/tw_stock_{代碼}.pdf`（除非 `--skip-pdf`；PDF 匯出時才組裝籌碼表 + 敘事）
-- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 並作為事實驗證基準；網站摘要／圖表讀此檔）
-- `reports/stock/{日期}/tw_stock_{代碼}.gate.log`（每輪驗證 JSON 紀錄，含 `layers` 與 `issue_codes`）
-- `reports/stock/{日期}/tw_stock_{代碼}.gate.rounds/`（各輪比較）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.md`（**敘事正文**；籌碼表不寫入 md）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.pdf`（除非 `--skip-pdf`；PDF 匯出時才組裝籌碼表 + 敘事）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 並作為事實驗證基準；網站摘要／圖表讀此檔）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.gate.log`（每輪驗證 JSON 紀錄，含 `layers` 與 `issue_codes`）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.gate.rounds/`（各輪比較）
   - `index.md` — 輪次摘要與比較指引
   - `r01.body.md` / `r01.prompt.txt` / `r01.validation.json`
   - `r02.*` …（若有第二輪修正）

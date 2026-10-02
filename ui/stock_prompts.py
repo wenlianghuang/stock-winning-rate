@@ -66,6 +66,7 @@ def build_single_stock_analysis_prompt_suffix(
         "- 若 facts 提供大盤脈絡，個股相對大盤（強於/弱於/同步）須與 facts 的相對強弱一致\n"
         "- 正文須明確引用 facts 的 anchors（至少 2 條）\n"
         "- 主力外資背離、法人共識、chip_regime 須在趨勢/交叉段說明\n"
+        "- 若 facts 含歷史 forward 對照：優先寫平均超額；贏大盤占比標「無明顯邊緣」時禁止寫成勝率／上漲機率優勢\n"
         "- 情境推演須寫觸發條件；觀察重點須可追蹤\n"
         "- 新聞只能引用上方內容，不可臆造\n"
         "- 趨勢判斷須依 facts 的區間欄位，避免僅依單日數據下結論\n"

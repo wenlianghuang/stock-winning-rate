@@ -9,7 +9,7 @@ description: 抓取台股個股籌碼面資料（收盤價、三大法人、融�
 從 [FinMind](https://finmindtrade.com/) 拉取台股個股籌碼資料，並從 Yahoo 股市 SSR 補上主力進出，整理成**當日快照 CSV**與**近 N 日歷史 CSV**（預設 5 個交易日）。
 
 涵蓋欄位：
-- 開盤價、最高價、最低價、收盤價、成交量、漲跌幅
+- 開盤價、最高價、最低價、收盤價、成交量、**漲跌幅（%）**（FinMind `spread` 為點數，寫入前換算成百分比，與大盤同基準）
 - 外資 / 投信 / 自營商買賣超（單位：張）
 - 融資、融券餘額與增減（單位：張）
 - 借券賣出、券賣還券（單位：張）
@@ -76,12 +76,14 @@ chat UI `/stock` 會執行完整流程（FinMind + Yahoo 主力 → agy 產出 .
 目錄結構（每檔股票一組）：
 
 ```
-reports/stock/{交易日}/
+reports/stock/{交易日}/{代碼}/
   tw_stock_2409.csv           # 當日快照 + 區間摘要欄位（單列）
   tw_stock_2409_history.csv   # 近 N 日逐日明細（N 列）
   tw_stock_2409.md            # agy 分析（chat UI / report-gate 產生）
   tw_stock_2409.pdf           # agy 分析 PDF
 ```
+
+讀取仍相容舊扁平路徑 `reports/stock/{交易日}/tw_stock_{代碼}.*`。
 
 - 快照 CSV：當日完整籌碼 + 區間趨勢摘要（回看天數、累計買賣超、MA5/MA20 等）
 - 歷史 CSV：每個交易日一列，欄位與當日相同（含主力）

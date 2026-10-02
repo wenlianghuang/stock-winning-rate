@@ -108,16 +108,10 @@ def fetch_news_text(row: dict[str, str]) -> str | None:
 
 
 def find_csv_path(stock_id: str, trade_date: str | None) -> Path | None:
-    stock_root = project_root() / "reports" / "stock"
-    if not stock_root.exists():
-        return None
+    _ensure_import_paths()
+    from stock_paths import find_stock_csv
 
-    if trade_date:
-        candidate = stock_root / trade_date / f"tw_stock_{stock_id}.csv"
-        return candidate if candidate.exists() else None
-
-    matches = sorted(stock_root.glob(f"*/tw_stock_{stock_id}.csv"))
-    return matches[-1] if matches else None
+    return find_stock_csv(stock_id, trade_date, root=project_root())
 
 
 def history_csv_path(snapshot_path: Path) -> Path:

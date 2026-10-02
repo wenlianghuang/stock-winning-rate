@@ -101,6 +101,13 @@ class ThresholdWriteTests(unittest.TestCase):
             )
             self.assertGreaterEqual(payload["n_rsi"], calib.MIN_THRESHOLD_SAMPLE)
             self.assertGreaterEqual(payload["rsi_overbought"], payload["rsi_oversold"])
+            # Absolute clamps (same bands as chip_signals)
+            self.assertGreaterEqual(payload["rsi_overbought"], 65.0)
+            self.assertLessEqual(payload["rsi_oversold"], 35.0)
+            self.assertGreaterEqual(payload["volume_spike_ratio"], 1.35)
+            self.assertLessEqual(payload["volume_shrink_ratio"], 0.75)
+            self.assertGreaterEqual(payload["atr_pct_high"], 2.5)
+            self.assertLessEqual(payload["atr_pct_low"], 2.0)
 
 
 if __name__ == "__main__":

@@ -62,11 +62,11 @@ python3 .agents/skills/position-gate/position_gate.py --all-holdings
 
 ## Output
 
-- `reports/stock/{日期}/tw_stock_{代碼}_position.md`（**敘事正文**；籌碼／部位表不寫入 md）
-- `reports/stock/{日期}/tw_stock_{代碼}_position.pdf`（除非 `--skip-pdf`；PDF 匯出時才組裝表格 + 敘事）
-- `reports/stock/{日期}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 撰寫市場面並作為事實驗證基準）
-- `reports/stock/{日期}/tw_stock_{代碼}.position.facts.json`（**harness 產物**：部位確定性試算——損益分桶、距損益兩平、均價 vs MA20、融資維持率／距追繳／壓力 zone、系統傾向；網站摘要讀此檔）
-- `reports/stock/{日期}/tw_stock_{代碼}.summary.json` 的 `position` 區塊含維持率欄位，供 report-site 融資卡顯示
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}_position.md`（**敘事正文**；籌碼／部位表不寫入 md）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}_position.pdf`（除非 `--skip-pdf`；PDF 匯出時才組裝表格 + 敘事）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.facts.json`（**harness 產物**：系統確定性計算的籌碼事實，餵給 agy 撰寫市場面並作為事實驗證基準）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.position.facts.json`（**harness 產物**：部位確定性試算——損益分桶、距損益兩平、均價 vs MA20、融資維持率／距追繳／壓力 zone、系統傾向；網站摘要讀此檔）
+- `reports/stock/{日期}/{代碼}/tw_stock_{代碼}.summary.json` 的 `position` 區塊含維持率欄位，供 report-site 融資卡顯示
 - `*.position.gate.log` 每輪含 `layers`（format / facts / position / reasoning）與 `issue_codes`
 
 ## Validation Criteria（分層 gate）

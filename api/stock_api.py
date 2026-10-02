@@ -337,57 +337,67 @@ def _tool_error(result: Any, fallback: str) -> None:
 
 
 def _find_md_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.md"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.md"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id, f"tw_stock_{stock_id}.md", trade_date=trade_date, root=ROOT
+    )
 
 
 def _find_position_md_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}_position.md"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}_position.md"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id,
+        f"tw_stock_{stock_id}_position.md",
+        trade_date=trade_date,
+        root=ROOT,
+    )
 
 
 def _find_csv_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.csv"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_csv
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.csv"))
-    return matches[-1] if matches else None
+    return find_stock_csv(stock_id, trade_date, root=ROOT)
 
 
 def _find_facts_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.facts.json"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.facts.json"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id,
+        f"tw_stock_{stock_id}.facts.json",
+        trade_date=trade_date,
+        root=ROOT,
+    )
 
 
 def _find_history_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}_history.csv"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}_history.csv"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id,
+        f"tw_stock_{stock_id}_history.csv",
+        trade_date=trade_date,
+        root=ROOT,
+    )
 
 
 def _find_chart_history_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}_chart_history.csv"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}_chart_history.csv"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id,
+        f"tw_stock_{stock_id}_chart_history.csv",
+        trade_date=trade_date,
+        root=ROOT,
+    )
 
 
 def _resolve_history_path(stock_id: str, trade_date: str | None) -> Path | None:
@@ -454,12 +464,15 @@ def _to_int(value: Any) -> int | None:
 
 
 def _find_summary_path(stock_id: str, trade_date: str | None) -> Path | None:
-    if trade_date:
-        candidate = STOCK_ROOT / trade_date / f"tw_stock_{stock_id}.summary.json"
-        return candidate if candidate.exists() else None
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
 
-    matches = sorted(STOCK_ROOT.glob(f"*/tw_stock_{stock_id}.summary.json"))
-    return matches[-1] if matches else None
+    return find_stock_artifact(
+        stock_id,
+        f"tw_stock_{stock_id}.summary.json",
+        trade_date=trade_date,
+        root=ROOT,
+    )
 
 
 def _load_summary_json(path: Path | None) -> dict[str, Any] | None:

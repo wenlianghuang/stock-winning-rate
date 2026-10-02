@@ -13,7 +13,7 @@ python main.py --list
 
 ## 個股籌碼 → 深度報告 → 部位
 
-先抓 CSV，再產報告。產物都在 `reports/stock/{日期}/`。
+先抓 CSV，再產報告。產物在 `reports/stock/{日期}/{代碼}/`（舊扁平路徑仍可讀）。
 
 ```bash
 # 抓籌碼（預設讀 .agents/skills/tw-stock-report/watchlist.txt）
@@ -35,9 +35,9 @@ uv run --extra ui --extra stock python main.py position-gate -- --all-holdings
 
 主要產物：
 
-- `tw_stock_{代碼}.csv` / `_history.csv` — 籌碼快照
-- `tw_stock_{代碼}.md`（敘事） / `.facts.json`（表格來源） / `.gate.log` / `.gate.rounds/` — report-gate
-- `tw_stock_{代碼}_position.md`（敘事） / `.position.facts.json`（表格來源） / `.position.gate.*` — position-gate
+- `{代碼}/tw_stock_{代碼}.csv` / `_history.csv` — 籌碼快照
+- `{代碼}/tw_stock_{代碼}.md`（敘事） / `.facts.json` / `.gate.log` / `.gate.rounds/` — report-gate
+- `{代碼}/tw_stock_{代碼}_position.md` / `.position.facts.json` / `.position.gate.*` — position-gate
 - `reports/digest/{日期}/digest.md` — `draft_digest` email 草稿（不寄信）
 
 ---
@@ -207,9 +207,12 @@ uv run --extra server --extra ui --extra stock python main.py api
 `backfill_history.py` 不在 `main.py` 裡，需直接跑。
 
 ```bash
-# 回補歷史快照 → reports/stock/{日期}/
+# 回補歷史快照 → reports/stock/{日期}/{代碼}/
 python tools/backfill_history.py --stocks 2330,2409 --start 2026-04-07 --end 2026-08-18
 python tools/backfill_history.py
+# 舊扁平目錄一次遷到 {日期}/{代碼}/（可重跑）
+python tools/migrate_stock_layout.py --dry-run
+python tools/migrate_stock_layout.py
 # 事後標籤 → reports/outcomes/outcomes.jsonl
 uv run python main.py outcome-label
 
@@ -226,8 +229,12 @@ uv run python main.py gate-stats -- --date 2026-08-18 --stock 2330 --json
 
 ## 建議當日流程
 
+收盤後先更新 outcome／校準，再產報，避免報告引用過期的 forward 對照表。
+
 ```bash
 uv run --extra stock python main.py stock-report -- --stocks 2330,2409
+uv run python main.py outcome-label
+uv run python main.py calibrate
 uv run --extra ui --extra stock python main.py report-gate -- 2330 --skip-pdf
 uv run --extra ui --extra stock python main.py position-gate -- 2330 <均價> <張數> --skip-pdf
 uv run --extra ui --extra stock python main.py market-daily

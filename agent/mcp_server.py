@@ -110,7 +110,7 @@ def _register_tools(mcp: FastMCP) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(readOnlyHint=False, title="Fetch chip CSV"),
         description=(
-            "抓台股籌碼快照，寫 reports/stock/{日期}/tw_stock_{代碼}.csv。"
+            "抓台股籌碼快照，寫 reports/stock/{日期}/{代碼}/tw_stock_{代碼}.csv。"
             "深度報告的第一步；run_report_gate 需要這份 CSV。"
             "stocks 可為 [\"2330\"] 或 \"2330\"；省略則讀 watchlist。"
             "可選 trade_date、lookback_days、chart_lookback_days、skip_major。"
