@@ -74,7 +74,7 @@ uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎
 
 概念、規則層、三層 gate 與網站 HTTP 流程見 [`portfolio.md`](./portfolio.md)。
 
-產物在 `reports/portfolio/{日期}/`。候選池：`.agents/skills/portfolio-gate/portfolio_universe.json`、`portfolio_theme_universe.json`。日常網站走 Go API（`:8765`）的 `GET /portfolio`、`POST /portfolio/jobs`。候選池缺當日 CSV 時 API 會自動 `FetchStock` 補抓（不跑個股 gate）。不需要先跑下面的 Python CLI。
+產物在 `reports/portfolio/{日期}/`。候選池：`.agents/skills/portfolio-gate/portfolio_universe.json`、`portfolio_theme_universe.json`。概念股比較另用 `concept_peers_universe.json`（初始與主題池相同；加對照股只改這份，不進投組、也不進下方 backfill 預設清單）。日常網站走 Go API（`:8765`）的 `GET /portfolio`、`POST /portfolio/jobs`。候選池缺當日 CSV 時 API 會自動補抓（不跑個股 gate）。不需要先跑下面的 Python CLI。
 
 ```bash
 # 規則組倉（不呼叫 agy）
@@ -209,6 +209,7 @@ uv run --extra server --extra ui --extra stock python main.py api
 ```bash
 # 回補歷史快照 → reports/stock/{日期}/{代碼}/
 python tools/backfill_history.py --stocks 2330,2409 --start 2026-04-07 --end 2026-08-18
+# 未指定 --stocks：只合併新手池 + 主題投組池，不含 concept_peers_universe.json
 python tools/backfill_history.py
 # 舊扁平目錄一次遷到 {日期}/{代碼}/（可重跑）
 python tools/migrate_stock_layout.py --dry-run

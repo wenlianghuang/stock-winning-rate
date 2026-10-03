@@ -15,10 +15,12 @@ sys.path.insert(0, str(SKILL_DIR))
 from twse_calendar import (  # noqa: E402
     clear_schedule_cache,
     fetch_trading_dates,
+    fetch_year_schedule,
     is_trading_day,
     market_traded_on,
     resolve_trade_date,
     resolve_lookback_dates,
+    _decode_twse_csv,
     _parse_schedule_csv,
 )
 
@@ -36,13 +38,31 @@ SAMPLE_CSV = '''"中華民國115年有價證券集中交易市場開（休）市
 '''
 
 
-def _mock_session() -> MagicMock:
+def _mock_session(*, encoding: str = "big5") -> MagicMock:
     session = MagicMock()
     response = MagicMock()
-    response.content = SAMPLE_CSV.encode("big5")
+    response.content = SAMPLE_CSV.encode(encoding)
     response.raise_for_status = MagicMock()
     session.get.return_value = response
     return session
+
+
+class DecodeTwseCsvTests(unittest.TestCase):
+    def test_decode_prefers_utf8_when_valid(self) -> None:
+        raw = SAMPLE_CSV.encode("utf-8")
+        text = _decode_twse_csv(raw)
+        self.assertIn("開（休）市", text)
+
+    def test_decode_accepts_big5(self) -> None:
+        raw = SAMPLE_CSV.encode("big5")
+        text = _decode_twse_csv(raw)
+        self.assertIn("開（休）市", text)
+
+    def test_fetch_year_schedule_utf8_response(self) -> None:
+        clear_schedule_cache()
+        schedule = fetch_year_schedule(2026, session=_mock_session(encoding="utf-8"))
+        self.assertEqual(schedule.year, 2026)
+        self.assertIn(dt.date(2026, 1, 2), schedule.entries)
 
 
 def _mock_session_with_taiex(*, volumes: dict[str, int | None]) -> MagicMock:

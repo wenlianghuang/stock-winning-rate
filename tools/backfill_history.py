@@ -119,6 +119,9 @@ def load_default_stock_ids(
 
     Keeps ``uv run --extra stock python tools/backfill_history.py`` covering
     both novice ETF/blue-chip sleeves and theme sleeves without ``--stocks``.
+
+    ``concept_peers_universe.json`` is intentionally excluded: concept-compare
+    peers are fetched on demand, not by this default backfill.
     """
     seen: set[str] = set()
     out: list[str] = []

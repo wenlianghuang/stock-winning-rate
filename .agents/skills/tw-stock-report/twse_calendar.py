@@ -40,6 +40,22 @@ _cache: dict[int, YearSchedule] = {}
 _cache_lock = threading.Lock()
 
 
+def _decode_twse_csv(raw: bytes) -> str:
+    """TWSE historically served Big5; some responses are now UTF-8."""
+    if not raw:
+        raise ValueError("證交所開休市 CSV 為空")
+    # UTF-8 BOM
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    for encoding in ("utf-8", "cp950", "big5"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    # Last resort: lose as little as possible and still attempt parse.
+    return raw.decode("utf-8", errors="replace")
+
+
 def _parse_schedule_csv(text: str, fallback_year: int) -> YearSchedule:
     reader = csv.reader(io.StringIO(text))
     rows = [row for row in reader if row and any(cell.strip() for cell in row)]
@@ -90,7 +106,7 @@ def fetch_year_schedule(
         timeout=30,
     )
     response.raise_for_status()
-    schedule = _parse_schedule_csv(response.content.decode("big5"), year)
+    schedule = _parse_schedule_csv(_decode_twse_csv(response.content), year)
     with _cache_lock:
         _cache[year] = schedule
     return schedule

@@ -12,6 +12,8 @@ from pathlib import Path
 
 DEFAULT_UNIVERSE = Path(__file__).with_name("portfolio_universe.json")
 DEFAULT_THEME_UNIVERSE = Path(__file__).with_name("portfolio_theme_universe.json")
+# Report-page concept compare only; not used by theme portfolio / backfill defaults.
+DEFAULT_CONCEPT_PEERS_UNIVERSE = Path(__file__).with_name("concept_peers_universe.json")
 
 
 def project_root() -> Path:

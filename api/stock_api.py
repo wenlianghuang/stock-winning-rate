@@ -444,6 +444,60 @@ def _load_stock_chart_payload(
     }
 
 
+def _close_from_history(
+    history: list[dict[str, Any]] | None,
+    trade_date: str | None,
+) -> float | None:
+    if not history:
+        return None
+    if trade_date:
+        for row in history:
+            if str(row.get("date") or "") == trade_date:
+                return _to_float(row.get("close"))
+    return _to_float(history[-1].get("close"))
+
+
+def _ensure_stock_facts(
+    stock_id: str,
+    trade_date: str | None,
+    *,
+    fetch: bool = True,
+) -> tuple[dict[str, Any] | None, str | None, float | None]:
+    """Return (facts, resolved_trade_date, close). Optionally fetch CSV + build facts."""
+    facts_path = _find_facts_path(stock_id, trade_date)
+    facts = _load_facts_json(facts_path)
+    history = _load_history_for_api(_resolve_history_path(stock_id, trade_date))
+
+    if facts is None and fetch:
+        try:
+            _fetch_stock_chart_data(stock_id, trade_date)
+        except Exception as exc:
+            raise RuntimeError(f"{stock_id} 資料抓取失敗：{exc}") from exc
+
+        from agent.tools.chips import BuildChipFactsInput, build_chip_facts
+
+        built = build_chip_facts(
+            BuildChipFactsInput(stock_id=stock_id, trade_date=trade_date)
+        )
+        if built.ok and isinstance(built.facts, dict):
+            facts = built.facts
+            trade_date = built.trade_date or trade_date
+        else:
+            facts = _load_facts_json(_find_facts_path(stock_id, trade_date))
+        history = _load_history_for_api(_resolve_history_path(stock_id, trade_date))
+
+    resolved = None
+    if isinstance(facts, dict):
+        resolved = str(facts.get("trade_date") or trade_date or "") or None
+    elif trade_date:
+        resolved = trade_date
+    elif history:
+        resolved = str(history[-1].get("date") or "") or None
+
+    close = _close_from_history(history, resolved)
+    return facts, resolved, close
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -1026,6 +1080,79 @@ def create_app() -> FastAPI:
                 detail=f"找不到 {stock_id} 的圖表資料。",
             )
         return payload
+
+    @app.get("/stocks/{stock_id}/concept-peers")
+    def get_concept_peers(stock_id: str) -> dict[str, Any]:
+        """Theme peers from concept_peers_universe (not the portfolio sleeve)."""
+        stock_id = stock_id.strip()
+        if not re.match(r"^\d{4,6}$", stock_id):
+            raise HTTPException(status_code=400, detail="stock_id 須為 4～6 位數台股代號")
+
+        _ensure_import_paths()
+        _ensure_portfolio_paths()
+        from concept_compare import find_concept_peers
+
+        return find_concept_peers(stock_id)
+
+    @app.get("/stocks/{stock_id}/compare/{peer_id}")
+    def compare_stocks(
+        stock_id: str,
+        peer_id: str,
+        date: str | None = None,
+        fetch: bool = True,
+    ) -> dict[str, Any]:
+        """Side-by-side chip facts for two stocks on the same trade date."""
+        stock_id = stock_id.strip()
+        peer_id = peer_id.strip()
+        if not re.match(r"^\d{4,6}$", stock_id) or not re.match(r"^\d{4,6}$", peer_id):
+            raise HTTPException(status_code=400, detail="stock_id／peer_id 須為 4～6 碼台股代號")
+        if stock_id == peer_id:
+            raise HTTPException(status_code=400, detail="比較標的不可與本檔相同")
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+
+        _ensure_import_paths()
+        _ensure_portfolio_paths()
+        from concept_compare import build_comparison, shared_themes_for
+
+        try:
+            base_facts, base_date, base_close = _ensure_stock_facts(
+                stock_id, date, fetch=fetch
+            )
+            peer_facts, peer_date, peer_close = _ensure_stock_facts(
+                peer_id, date or base_date, fetch=fetch
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        trade_date = date or base_date or peer_date
+        if (
+            base_date
+            and peer_date
+            and base_date != peer_date
+            and date is None
+        ):
+            # Prefer anchoring to the base report date when peer was fetched fresh.
+            trade_date = base_date
+
+        comparison = build_comparison(
+            base_facts=base_facts,
+            peer_facts=peer_facts,
+            base_close=base_close,
+            peer_close=peer_close,
+            shared_themes=shared_themes_for(stock_id, peer_id),
+        )
+        comparison["trade_date"] = trade_date
+        comparison["base_id"] = stock_id
+        comparison["peer_id"] = peer_id
+        if not comparison["base"].get("available") and not comparison["peer"].get(
+            "available"
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=f"找不到 {stock_id} 與 {peer_id} 的可比較資料。",
+            )
+        return comparison
 
     @app.get("/us-indices")
     def us_indices() -> dict[str, Any]:

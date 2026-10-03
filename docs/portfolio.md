@@ -43,7 +43,7 @@ Go 移植刻意 **略過基本面**（對齊 Python `--skip-fundamentals`）：�
 | | 新手 `beginner` | 主題 `theme` |
 |---|---|---|
 | 使用者輸入 | `profile`：conservative / balanced / aggressive；`amount` ≥ 5 萬 | `themes`：1～3 個主題 id（如 `financials` 或 `financials,thermal`）；`amount` ≥ 5 萬 |
-| 候選池 | 內嵌 `portfolio_universe.json`（市值／高股息 ETF + 權值藍籌） | 內嵌 `portfolio_theme_universe.json`（主題 ETF + 主題個股） |
+| 候選池 | `portfolio_universe.json`（市值／高股息 ETF + 權值藍籌） | `portfolio_theme_universe.json`（主題 ETF + 主題個股）。報告頁概念股比較用另一份 `concept_peers_universe.json`，不參與本節選股 |
 | 定位 | 全倉新手底倉：ETF 打底、產業分散 | **袖口**，不是全市場分散；可疊在既有部位上 |
 | 選股 | ETF 優先各類各挑、個股每 sector 至多 1 檔 | 先主題 ETF，再依主題名額挑個股；同主題可同產業 |
 | 權重 | 分數 water-fill + 單檔上限 + **ETF 核心最低佔比** | 分數 water-fill；持股少時放寬單檔上限以免加不滿 100% |
