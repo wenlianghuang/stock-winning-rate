@@ -91,6 +91,20 @@ uv run --extra ui --extra stock python main.py portfolio-gate -- --mode theme --
 
 ---
 
+## 概念股比較（報告頁決策圖）
+
+流程、信件分層與核准見 [`peer-graph.md`](./peer-graph.md)。這不是 `python main.py agent`，也不是 MCP／A2A。
+
+報告頁選同主題對照股後，網站打 FastAPI（`python main.py api`，`--extra server` 已含 langgraph）：
+
+- `POST /peer-graph/jobs`
+- `GET /peer-graph/jobs/{id}`
+- 核准寄出時：`POST /peer-graph/jobs/{id}/send-claim`，網站寄信後再 `POST .../send-result`
+
+草稿在 `reports/digest/{日期}/peer_{本檔代號}_{對照代號}.md`。對照池是 `concept_peers_universe.json`，不進投組。網站目前不在這張圖裡補抓；沒有同日 facts 就停。
+
+---
+
 ## 美股科技新聞
 
 產物在 `reports/us-tech/`。

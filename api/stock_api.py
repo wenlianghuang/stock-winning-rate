@@ -207,6 +207,22 @@ def _update_portfolio_job(job: PortfolioJob, **changes: Any) -> None:
     job.updated_at = _now_iso()
 
 
+class PeerGraphSendResult(BaseModel):
+    ok: bool
+    error: str | None = None
+
+
+class CreatePeerGraphJobRequest(BaseModel):
+    stock_id: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+    peer_id: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+    trade_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    fetch: bool = True
+    is_holding: bool = False
+    share_count: int | None = Field(default=None, gt=0)
+    avg_cost: float | None = Field(default=None, gt=0)
+    skip_pdf: bool = True
+
+
 class CreateJobRequest(BaseModel):
     stock_id: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
     trade_date: str | None = Field(
@@ -1671,6 +1687,65 @@ def create_app() -> FastAPI:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.post("/peer-graph/jobs")
+    def create_peer_graph_job(body: CreatePeerGraphJobRequest) -> dict[str, Any]:
+        if body.stock_id.strip() == body.peer_id.strip():
+            raise HTTPException(status_code=400, detail="比較標的不可與本檔相同")
+        if body.is_holding and (body.share_count is None or body.avg_cost is None):
+            raise HTTPException(
+                status_code=400,
+                detail="持股分析需要 share_count 與 avg_cost",
+            )
+        from agent.web_graph import enqueue_peer_graph
+
+        try:
+            job = enqueue_peer_graph(
+                stock_id=body.stock_id,
+                peer_id=body.peer_id,
+                trade_date=body.trade_date,
+                fetch=body.fetch,
+                is_holding=body.is_holding,
+                avg_cost=body.avg_cost,
+                share_count=body.share_count,
+                skip_pdf=body.skip_pdf,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"job": job}
+
+    @app.get("/peer-graph/jobs/{job_id}")
+    def get_peer_graph_job_route(job_id: str) -> dict[str, Any]:
+        from agent.web_graph import get_peer_graph_job
+
+        job = get_peer_graph_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到同業決策 job")
+        return {"job": job}
+
+    @app.post("/peer-graph/jobs/{job_id}/send-claim")
+    def claim_peer_graph_send_route(job_id: str) -> dict[str, Any]:
+        from agent.web_graph import claim_peer_graph_send
+
+        try:
+            job = claim_peer_graph_send(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="找不到同業決策 job") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"job": job}
+
+    @app.post("/peer-graph/jobs/{job_id}/send-result")
+    def finish_peer_graph_send_route(job_id: str, body: PeerGraphSendResult) -> dict[str, Any]:
+        from agent.web_graph import finish_peer_graph_send
+
+        try:
+            job = finish_peer_graph_send(job_id, ok=body.ok, error=body.error)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="找不到同業決策 job") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"job": job}
 
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:

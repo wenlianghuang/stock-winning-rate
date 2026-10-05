@@ -43,23 +43,32 @@
 
 ## 3. 各層怎麼接
 
+報告頁的概念股比較不進 `run_agent`。其餘入口仍匯進同一組 tools。
+
 ```
-網站 HTTP / CLI / Cursor MCP / A2A client
-              │
-              ▼
-        agent.tools     ← 同一組台股能力
-              ▲
-     ┌────────┴────────┐
-     │                 │
-python main.py mcp   python main.py a2a
- MCP：Agent → 工具    A2A：Agent → 本 Agent
-                      （Card + task）
-                              │
-                              ▼
-                       run_agent / policy
+報告頁概念股比較
+        │
+        ▼
+ LangGraph peer graph ──► agent.tools
+ （agent/web_graph.py；不進 run_agent）
+
+CLI / 其他網站 HTTP / Cursor MCP / A2A client
+        │
+        ▼
+ Orchestrator，或 MCP 直接叫 tool
+        │
+        ▼
+   agent.tools     ← 同一組台股能力
+        ▲
+ python main.py mcp     python main.py a2a
+ MCP：Agent → 工具       A2A：Agent → 本 Agent
+                         （Card + task）
+                                 │
+                                 ▼
+                          run_agent / policy
 ```
 
-四種入口共用 tools：Orchestrator、FastAPI、MCP、A2A。Copilot Studio **custom connector／MCP** 接的是工具層；**Add A2A agent** 接 Phase 5 這個 server。不要為 Studio 重寫籌碼／gate。
+決策圖、Orchestrator、FastAPI、MCP、A2A 共用 tools。決策圖不對 MCP／A2A 開放，見 [`peer-graph.md`](./peer-graph.md)。Copilot Studio **custom connector／MCP** 接的是工具層；**Add A2A agent** 接 Phase 5 這個 server。不要為 Studio 重寫籌碼／gate。
 
 ---
 

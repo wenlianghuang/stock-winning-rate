@@ -15,6 +15,7 @@ from concept_compare import (  # noqa: E402
     build_comparison,
     build_highlights,
     find_concept_peers,
+    relative_stance,
 )
 
 
@@ -94,6 +95,34 @@ class ConceptCompareTests(unittest.TestCase):
         keys = {row["key"] for row in payload["rows"]}
         self.assertIn("today_change_pct", keys)
         self.assertIn("foreign_net_lots", keys)
+        self.assertIn(payload["stance"]["label"], {"stronger", "weaker", "mixed", "unknown"})
+
+    def test_relative_stance_weaker_needs_two_signals(self) -> None:
+        base = {
+            "available": True,
+            "stock_name": "友達",
+            "period_return_pct": -4.0,
+            "today_change_pct": -1.2,
+            "chip_regime": "distribution",
+            "rs_today": "underperform",
+        }
+        peer = {
+            "available": True,
+            "stock_name": "群創",
+            "period_return_pct": 2.0,
+            "today_change_pct": 0.4,
+            "chip_regime": "accumulation",
+            "rs_today": "outperform",
+        }
+        stance = relative_stance(base, peer)
+        self.assertEqual(stance["label"], "weaker")
+        self.assertTrue(stance["base_weaker"])
+        self.assertGreaterEqual(len(stance["reasons"]), 2)
+
+    def test_relative_stance_unknown_without_facts(self) -> None:
+        stance = relative_stance({"available": False}, {"available": True})
+        self.assertEqual(stance["label"], "unknown")
+        self.assertFalse(stance["base_weaker"])
 
 
 if __name__ == "__main__":

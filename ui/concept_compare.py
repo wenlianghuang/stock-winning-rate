@@ -294,6 +294,66 @@ def build_highlights(
     return out
 
 
+def relative_stance(base: dict[str, Any], peer: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic base-vs-peer stance. ``base_weaker`` is true only for label weaker.
+
+    Weaker needs at least two of: period return lags by >1pt, today lags by >0.3pt,
+    chip regime is distribution while the peer is not, or today RS underperforms
+    while the peer outperforms. The mirror counts as stronger. Otherwise mixed.
+    """
+    if not base.get("available") or not peer.get("available"):
+        return {
+            "label": "unknown",
+            "base_weaker": False,
+            "reasons": ["其中一檔沒有同日 facts，無法判斷強弱。"],
+        }
+
+    weaker: list[str] = []
+    stronger: list[str] = []
+    base_name = str(base.get("stock_name") or base.get("stock_id") or "本檔")
+
+    b_ret = _num(base.get("period_return_pct"))
+    p_ret = _num(peer.get("period_return_pct"))
+    if b_ret is not None and p_ret is not None:
+        if b_ret < p_ret - 1.0:
+            weaker.append(f"區間報酬落後（{base_name} {b_ret:+.2f}%）")
+        elif p_ret < b_ret - 1.0:
+            stronger.append(f"區間報酬領先（{base_name} {b_ret:+.2f}%）")
+
+    b_chg = _num(base.get("today_change_pct"))
+    p_chg = _num(peer.get("today_change_pct"))
+    if b_chg is not None and p_chg is not None:
+        if b_chg < p_chg - 0.3:
+            weaker.append(f"當日漲跌落後（{base_name} {b_chg:+.2f}%）")
+        elif p_chg < b_chg - 0.3:
+            stronger.append(f"當日漲跌領先（{base_name} {b_chg:+.2f}%）")
+
+    b_chip = str(base.get("chip_regime") or "unknown")
+    p_chip = str(peer.get("chip_regime") or "unknown")
+    if b_chip == "distribution" and p_chip != "distribution":
+        weaker.append("籌碼狀態較空")
+    elif p_chip == "distribution" and b_chip != "distribution":
+        stronger.append("對照檔籌碼較空")
+
+    b_rs = str(base.get("rs_today") or "unknown")
+    p_rs = str(peer.get("rs_today") or "unknown")
+    if b_rs == "underperform" and p_rs == "outperform":
+        weaker.append("當日相對大盤弱於對照檔")
+    elif p_rs == "underperform" and b_rs == "outperform":
+        stronger.append("當日相對大盤強於對照檔")
+
+    if len(weaker) >= 2 and len(weaker) > len(stronger):
+        label = "weaker"
+    elif len(stronger) >= 2 and len(stronger) > len(weaker):
+        label = "stronger"
+    else:
+        label = "mixed"
+    reasons = weaker + stronger
+    if not reasons:
+        reasons = ["可比欄位不足或差距在門檻內，視為分歧。"]
+    return {"label": label, "base_weaker": label == "weaker", "reasons": reasons}
+
+
 def build_compare_rows(
     base: dict[str, Any],
     peer: dict[str, Any],
@@ -344,6 +404,7 @@ def build_comparison(
         "peer": peer,
         "rows": build_compare_rows(base, peer),
         "highlights": build_highlights(base, peer),
+        "stance": relative_stance(base, peer),
         "shared_themes": shared_themes or [],
     }
 

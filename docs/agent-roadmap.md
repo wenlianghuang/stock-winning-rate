@@ -4,7 +4,7 @@
 
 網站（`stock-report-site`）當導入層，STT（`AI_Speech/stt`）當語音 tool。本文件只規劃 `stock-winning-rate` 本體；相鄰 repo 的接點寫在最後一節。
 
-命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。A2A 為什麼不能沒有 orchestrator，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。
+命令速查見 [`commands.md`](./commands.md)。職缺並列的 MCP／A2A 差在哪、Phase 2／3 為什麼**不是** Agent2Agent，見 [`a2a.md`](./a2a.md)。A2A 協定落地見 [`Phase5.md`](./Phase5.md)。A2A 為什麼不能沒有 orchestrator，見 [`a2a-without-orchestrator.md`](./a2a-without-orchestrator.md)。報告頁的概念股比較是另一條已落地的產品（LangGraph 決策圖，不走 orchestrator／MCP／A2A），見 [`peer-graph.md`](./peer-graph.md)。
 
 ---
 
@@ -67,29 +67,37 @@ Phase 0–4 已落地後，下列是**當時**要補的能力（實作狀態見�
 
 ## 3. 目標架構
 
+兩條編排並用同一組 tool。報告頁的概念股比較不經過意圖 orchestrator。
+
 ```
-使用者（網站／CLI／語音）
-        │
-        ▼
-┌───────────────────┐
-│ Orchestrator      │  意圖解析、tool 選擇、失敗重試、人機臨界點
-│ （本 repo 新層）   │  單 process；不是 A2A 網路
-└─────────┬─────────┘
-          │ MCP（Agent → 工具；已落地）
-    ┌─────┴──────────────────────────────┐
-    ▼          ▼           ▼             ▼
- Data        Research    Position     Notify
- （角色）     （角色）     （角色）     （角色）
-    │          │           │             │
-    ▼          ▼           ▼             ▼
- fetch_chips  report-gate position-gate send_digest
- build_facts  daily/weekly portfolio    （核准後）
-              validate-*
+使用者
+   │
+   ├─ 報告頁：概念股比較
+   │        ▼
+   │  LangGraph 同業決策圖          agent/web_graph.py
+   │  data → research → compare
+   │       → 較弱且有持倉才 position → draft
+   │  停在寄信前。MCP／A2A 不進這張圖。
+   │        │
+   │        ▼
+   └─ CLI 一句話 / MCP / A2A
+            ▼
+     Orchestrator                 意圖、plan、失敗重試、人機臨界點
+     （單 process；不是 A2A 網路）
+            │
+            ▼
+     同一組 agent.tools
+       Data        Research     Position      Notify
+       fetch_chips report-gate  position-gate send_digest
+       build_facts daily/weekly portfolio     （核准後）
+                   validate-*
 ```
 
-圖裡的 Data／Research／… 是 **邏輯角色**，跑在同一個 Orchestrator process。它們沒有各自的 Agent Card，也沒有用 Agent2Agent 協定互叫。職缺的 A2A 是「Studio 或其他 Agent ↔ 本系統」的另一條線：Phase 5 用**一個** A2A server 包 `run_agent`。見 [`a2a.md`](./a2a.md)、[`Phase5.md`](./Phase5.md)。
+圖裡的 Data／Research／… 是 **邏輯角色**。在 orchestrator 那條線上，它們跑在同一個 process，沒有各自的 Agent Card，也沒有用 Agent2Agent 協定互叫。決策圖上的節點同樣只呼叫這些 tool，分支由圖決定，不由模型現編 plan。
 
-同一組 tool 四種入口共用：Orchestrator、現有 FastAPI、MCP、A2A。Copilot Studio **custom connector** 若接，接的是 HTTP／MCP 工具層；**Add A2A agent** 接 Phase 5 的 `python main.py a2a`。  
+職缺的 A2A 是「Studio 或其他 Agent ↔ 本系統」的另一條線：Phase 5 用**一個** A2A server 包 `run_agent`。見 [`a2a.md`](./a2a.md)、[`Phase5.md`](./Phase5.md)。概念股比較的狀態、信件與核准見 [`peer-graph.md`](./peer-graph.md)。
+
+同一組 tool 給這些入口共用：Orchestrator、決策圖、現有 FastAPI、MCP、A2A。Copilot Studio **custom connector** 若接，接的是 HTTP／MCP 工具層；**Add A2A agent** 接 Phase 5 的 `python main.py a2a`。決策圖不對 MCP／A2A 開放。  
 **不要**為 Microsoft 棧重做整套台股邏輯。
 
 角色對應現有程式（先當邏輯邊界，**不是** 六個 A2A server；A2A 只有一個對外 runtime）：
@@ -234,6 +242,7 @@ Plan 通過 schema 驗證後才執行。執行失敗用規則決定 retry 或停
 - 不接券商下單、不自動改持股。
 - 不用 Copilot Studio 重寫籌碼／gate。
 - **不把 Data／Research／Position 拆成多個 A2A server。** Phase 5 只有一個對外 Agent Card，被叫到仍進 `agent.tools`。Phase 2／3 也不得改稱 A2A 經驗。見 [`a2a.md`](./a2a.md)。
+- **不把概念股比較的 LangGraph 掛上 MCP 或 A2A。** 那張圖只服務報告頁，見 [`peer-graph.md`](./peer-graph.md)。
 - 不把 MCP、Orchestrator、排程、A2A 在同一個 PR 一次做完（A2A 已另開 Phase 5）。
 
 ---
@@ -255,6 +264,8 @@ agent/
   a2a_inspector.py  # 官方 Inspector 啟動器（clone 在 .cache）
   a2a_adk.py      # Google ADK peer client 啟動器
   adk_clients/    # 獨立 uv 專案（google-adk），不進本 repo extra
+  web_graph.py    # 報告頁概念股比較的 LangGraph
+  peer_letter.py  # 比較信：規則結論 + 受檢查的解讀
 ```
 
 `main.py` 加子命令：`mcp`、`agent`、`schedule`、`a2a`。  
@@ -266,10 +277,10 @@ agent/
 
 | Repo | 角色 | 本路線對它的要求 |
 |------|------|------------------|
-| `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 開盤前日報讀全站共用 brief（Phase 4）。寄信仍可之後吃 pending digest。 |
+| `stock-report-site` | 導入：登入、儀表板、語音填表、寄信 | 開盤前日報讀全站共用 brief（Phase 4）。概念股比較打 `/peer-graph/jobs`，核准後由網站寄信，見 [`peer-graph.md`](./peer-graph.md)。 |
 | `AI_Speech/stt` | `transcribe_voice` tool | 本 repo 最多加一個可選 MCP tool 轉打 STT HTTP；不在本 repo 擴 whisper。 |
 
-面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。MCP 給 Cursor 選 tool；A2A 給另一個 Agent runtime 發現並委派。Phase 2／3 是編排與權限，不是 A2A。
+面試故事收成一句：這是券商研究／投顧作業的 Agent；網站是導入層，語音是入口；數字由 harness 算、gate 擋住。MCP 給 Cursor 選 tool；A2A 給另一個 Agent runtime 發現並委派。Phase 2／3 是編排與權限，不是 A2A。報告頁的概念股比較是另一張 LangGraph 決策圖，也不是 A2A。
 
 ---
 
