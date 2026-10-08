@@ -636,7 +636,7 @@ def _summarize(
         return str(payload.get("subject") or payload.get("error") or "draft")
     if tool == "send_digest":
         return str(payload.get("status") or payload.get("error") or "")
-    if tool == "answer_market_chat":
+    if tool in ("answer_market_chat", "answer_report_chat"):
         reply = str(payload.get("reply") or "")
         return reply[:80] + ("…" if len(reply) > 80 else "")
     if tool == "get_holdings":
@@ -680,6 +680,10 @@ def default_dispatch(tool: str, args: dict[str, Any]) -> Any:
         from agent.tools.market import answer_market_chat
 
         return answer_market_chat(**args)
+    if tool == "answer_report_chat":
+        from agent.tools.report import answer_report_chat
+
+        return answer_report_chat(**args)
     if tool == "draft_digest":
         from agent.tools.digest import DigestItem, draft_digest
 

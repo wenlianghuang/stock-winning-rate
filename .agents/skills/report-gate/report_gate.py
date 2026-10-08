@@ -6,9 +6,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
-import shutil
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -38,27 +35,6 @@ def _ensure_import_paths() -> None:
         text = str(path)
         if text not in sys.path:
             sys.path.insert(0, text)
-
-
-def resolve_agy_bin() -> str:
-    custom = os.environ.get("AGY_BIN", "").strip()
-    if custom:
-        return custom
-    found = shutil.which("agy")
-    if not found:
-        print(
-            "CRITICAL_ERROR: 找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。",
-            file=sys.stderr,
-        )
-        raise SystemExit(EXIT_AGY_MISSING)
-    return found
-
-
-def _load_agy_helpers():
-    _ensure_import_paths()
-    from agy_output import agy_output_usable, clean_agy_output
-
-    return clean_agy_output, agy_output_usable
 
 
 def _load_report_writer():
@@ -232,35 +208,18 @@ def build_fix_prompt(
 
 
 def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, int]:
-    agy_bin = resolve_agy_bin()
-    clean_agy_output, agy_output_usable = _load_agy_helpers()
     print("agy 產生 / 修正報告中…", file=sys.stderr)
-    try:
-        result = subprocess.run(
-            [
-                agy_bin,
-                "-p",
-                prompt,
-                "--dangerously-skip-permissions",
-                "--print-timeout",
-                "15m",
-            ],
-            cwd=project_root(),
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
+    root = str(project_root())
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from agent.llm import GATE_MIN_CHARS, invoke_agy
 
-    raw = result.stdout or result.stderr or ""
-    body = clean_agy_output(raw)
-    if not agy_output_usable(body):
-        detail = body[:200] if body else "(空)"
-        raise RuntimeError(
-            f"agy 輸出不可用（exit {result.returncode}）：{detail}"
-        )
-    return body, result.returncode
+    try:
+        done = invoke_agy(prompt, timeout_sec=timeout_sec, min_chars=GATE_MIN_CHARS)
+    except FileNotFoundError as exc:
+        print(f"CRITICAL_ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(EXIT_AGY_MISSING) from exc
+    return done.text, done.exit_code
 
 
 FACT_ISSUE_PREFIXES = ("fact_", "anchors_")

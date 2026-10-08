@@ -6,10 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
-import shutil
-import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -353,25 +350,20 @@ def write_raw_text(
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
 
+def _import_llm():
+    root = str(project_root())
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from agent import llm
+
+    return llm
+
+
 def resolve_agy_bin() -> str:
-    custom = os.environ.get("AGY_BIN", "").strip()
-    if custom:
-        return custom
-    found = shutil.which("agy")
-    if not found:
-        raise RuntimeError(
-            "找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。"
-        )
-    return found
-
-
-def _load_agy_helpers():
-    ui_path = project_root() / "ui"
-    if str(ui_path) not in sys.path:
-        sys.path.insert(0, str(ui_path))
-    from agy_output import agy_output_usable, clean_agy_output
-
-    return clean_agy_output, agy_output_usable
+    try:
+        return _import_llm().agy_executable()
+    except FileNotFoundError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def build_agy_prompt(date_str: str, raw_path: Path, indices: list[IndexSnapshot]) -> str:
@@ -445,31 +437,12 @@ def build_fix_prompt(
 
 
 def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, int]:
-    agy_bin = resolve_agy_bin()
-    clean_agy_output, agy_output_usable = _load_agy_helpers()
+    llm = _import_llm()
     try:
-        result = subprocess.run(
-            [
-                agy_bin,
-                "-p",
-                prompt,
-                "--dangerously-skip-permissions",
-                "--print-timeout",
-                "15m",
-            ],
-            cwd=project_root(),
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
-
-    body = clean_agy_output(result.stdout or result.stderr or "")
-    if not agy_output_usable(body):
-        detail = body[:200] if body else "(空)"
-        raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
-    return body, result.returncode
+        done = llm.invoke_agy(prompt, timeout_sec=timeout_sec, min_chars=llm.GATE_MIN_CHARS)
+    except FileNotFoundError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return done.text, done.exit_code
 
 
 def round_artifact_paths(gate_rounds_dir: Path, round_no: int) -> dict[str, Path]:

@@ -41,6 +41,7 @@ TOOL_NAMES = (
     "run_position_gate",
     "run_market_daily",
     "answer_market_chat",
+    "answer_report_chat",
     "draft_digest",
     "send_digest",
 )
@@ -301,6 +302,31 @@ def _register_tools(mcp: FastMCP) -> None:
                     has_holdings=has_holdings,
                     use_llm=use_llm,
                     skip_tavily=skip_tavily,
+                )
+            )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, title="Grounded stock report chat"),
+        description=(
+            "針對個股既有深度報告與籌碼 facts 回答問題（三大法人、主力、資券、當沖、均線、ATR、名詞解釋等）。"
+            "需要 stock_id 與 message；可選 trade_date。"
+        ),
+    )
+    def answer_report_chat(
+        stock_id: str,
+        message: str,
+        trade_date: str | None = None,
+        use_llm: bool = True,
+    ) -> dict[str, Any]:
+        from agent.tools.report import answer_report_chat as impl
+
+        with _stderr_stdout():
+            return _payload(
+                impl(
+                    stock_id=stock_id.strip(),
+                    message=message,
+                    trade_date=_opt_str(trade_date),
+                    use_llm=use_llm,
                 )
             )
 

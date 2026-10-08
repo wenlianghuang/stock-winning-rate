@@ -45,7 +45,7 @@
 | 持股部位閉環 | `position-gate/position_gate.py` | `_position.md` / `.position.facts.json` |
 | 投組規則 + 敘事 | `portfolio-gate/` | `reports/portfolio/` |
 | 開盤前日報／週報 | `market-daily/`、`market-weekly/` | `reports/market/` |
-| Grounded chat | `market_day_chat.py`、`POST /market-daily/chat/stream` | facts 優先、長尾才 LLM |
+| Grounded chat | `market_day_chat.py`、`POST /market-daily/chat/stream`；個股見 [`stock-report-chat.md`](./stock-report-chat.md) | facts 優先、長尾才 LLM |
 | HTTP 工作流 | `api/stock_api.py` | `/jobs`、`/digest`、portfolio／market jobs |
 | 品質回饋 | `tools/gate_stats.py`、`outcome-label`、`calibrate` | 校準與事後標籤 |
 

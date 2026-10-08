@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from agent.tools._paths import ensure_paths
 from agent.tools._types import (
+    EXIT_BAD_ARGS,
     EXIT_CSV_MISSING,
     EXIT_FAILED,
     EXIT_OK,
@@ -144,3 +145,76 @@ def run_report_gate(
         if params.skip_pdf
         else (str(pdf_path) if pdf_path.exists() else None),
     )
+
+
+@dataclass
+class ReportChatInput:
+    stock_id: str
+    message: str
+    trade_date: str | None = None
+    facts: dict[str, Any] | None = None
+    summary: dict[str, Any] | None = None
+    markdown: str | None = None
+    position_facts: dict[str, Any] | None = None
+    position_markdown: str | None = None
+    holdings: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, str]] = field(default_factory=list)
+    use_llm: bool = True
+
+
+@dataclass
+class ReportChatResult(ToolResult):
+    stock_id: str | None = None
+    reply: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+def answer_report_chat(
+    inp: ReportChatInput | None = None,
+    **overrides: Any,
+) -> ReportChatResult:
+    if inp is None and ("stock_id" not in overrides or "message" not in overrides):
+        return ReportChatResult(
+            ok=False,
+            exit_code=EXIT_BAD_ARGS,
+            error="stock_id 與 message 不可為空",
+        )
+    params = inp or ReportChatInput(
+        stock_id=str(overrides.get("stock_id", "")),
+        message=str(overrides.get("message", "")),
+    )
+    if overrides:
+        data = asdict(params)
+        data.update(overrides)
+        params = ReportChatInput(**data)
+    try:
+        from stock_report_chat import answer_stock_report_chat  # type: ignore[import-not-found]
+
+        payload = answer_stock_report_chat(
+            stock_id=params.stock_id,
+            message=params.message,
+            facts=params.facts,
+            summary=params.summary,
+            markdown=params.markdown,
+            position_facts=params.position_facts,
+            position_markdown=params.position_markdown,
+            trade_date=params.trade_date,
+            holdings=params.holdings,
+            history=params.history,
+            use_llm=params.use_llm,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ReportChatResult(
+            ok=False,
+            exit_code=EXIT_FAILED,
+            error=str(exc),
+            stock_id=params.stock_id,
+        )
+    return ReportChatResult(
+        ok=True,
+        exit_code=EXIT_OK,
+        stock_id=params.stock_id,
+        reply=str(payload.get("reply") or ""),
+        payload=payload,
+    )
+

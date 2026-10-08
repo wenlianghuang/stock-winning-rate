@@ -263,6 +263,7 @@ VOLUME_SPIKE_PHRASES = (
     "量能激增",
     "成交量大增",
     "量能明顯放大",
+    "成交量明顯放大",
 )
 VOLUME_SHRINK_PHRASES = (
     "量縮",
@@ -272,6 +273,7 @@ VOLUME_SHRINK_PHRASES = (
     "量能不足",
     "成交量萎縮",
     "量能明顯萎縮",
+    "成交量明顯萎縮",
 )
 VOLUME_TREND_HEATING_PHRASES = (
     "量能升溫",

@@ -5,9 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -49,56 +46,20 @@ def ensure_paths() -> None:
             sys.path.insert(0, text)
 
 
-def resolve_agy_bin() -> str:
-    custom = os.environ.get("AGY_BIN", "").strip()
-    if custom:
-        return custom
-    found = shutil.which("agy")
-    if not found:
-        print(
-            "CRITICAL_ERROR: 找不到 agy。請安裝 Antigravity CLI 或設定 AGY_BIN。",
-            file=sys.stderr,
-        )
-        raise SystemExit(EXIT_AGY_MISSING)
-    return found
-
-
 def run_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> tuple[str, int]:
-    try:
-        from agent.llm import complete
+    root = str(project_root())
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from agent.llm import GATE_MIN_CHARS, complete, invoke_agy, resolved_backend
 
+    if resolved_backend() == "ollama":
         return complete(prompt, timeout_sec=timeout_sec), 0
-    except ImportError:
-        pass
-
-    ensure_paths()
-    from agy_output import agy_output_usable, clean_agy_output
-
-    agy_bin = resolve_agy_bin()
     try:
-        result = subprocess.run(
-            [
-                agy_bin,
-                "-p",
-                prompt,
-                "--dangerously-skip-permissions",
-                "--print-timeout",
-                "15m",
-            ],
-            cwd=project_root(),
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"agy 逾時（>{timeout_sec}s）") from exc
-
-    raw = result.stdout or result.stderr or ""
-    body = clean_agy_output(raw)
-    if not agy_output_usable(body):
-        detail = body[:200] if body else "(空)"
-        raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
-    return body, result.returncode
+        done = invoke_agy(prompt, timeout_sec=timeout_sec, min_chars=GATE_MIN_CHARS)
+    except FileNotFoundError as exc:
+        print(f"CRITICAL_ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(EXIT_AGY_MISSING) from exc
+    return done.text, done.exit_code
 
 
 @dataclass

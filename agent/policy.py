@@ -32,13 +32,14 @@ ALLOWED_TOOLS = frozenset(
         "run_position_gate",
         "run_market_daily",
         "answer_market_chat",
+        "answer_report_chat",
         "draft_digest",
         "send_digest",
     }
 )
 
 DATA_TOOLS = frozenset({"get_last_trading_date", "fetch_chips", "build_chip_facts"})
-RESEARCH_TOOLS = frozenset({"run_report_gate", "run_market_daily", "answer_market_chat"})
+RESEARCH_TOOLS = frozenset({"run_report_gate", "run_market_daily", "answer_market_chat", "answer_report_chat"})
 POSITION_TOOLS = frozenset({"run_position_gate"})
 GATE_TOOLS = frozenset({"run_report_gate", "run_position_gate", "run_market_daily"})
 NOTIFY_TOOLS = frozenset({"draft_digest", "send_digest"})
@@ -73,6 +74,7 @@ TOOL_ACTOR: dict[str, str] = {
     "run_report_gate": ROLE_RESEARCH,
     "run_market_daily": ROLE_RESEARCH,
     "answer_market_chat": ROLE_CHAT,
+    "answer_report_chat": ROLE_CHAT,
     "run_position_gate": ROLE_POSITION,
     "draft_digest": ROLE_NOTIFY,
     "send_digest": ROLE_NOTIFY,
@@ -88,6 +90,7 @@ ROLE_ALLOWLIST: dict[str, frozenset[str]] = {
     ROLE_CHAT: frozenset(
         {
             "answer_market_chat",
+            "answer_report_chat",
             "get_last_trading_date",
             "get_holdings",
             "run_market_daily",

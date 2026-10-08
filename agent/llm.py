@@ -1,7 +1,9 @@
-"""Phase 4 LLM adapter: narrative backends are swappable (agy / Ollama).
+"""Narrative calls.
 
-Business logic stays in tools and gates. Orchestrator and skills call `complete()`
-and do not import agy or Ollama directly.
+`invoke_agy` is the only agy subprocess: timeout, output cleanup, and CLI
+flags live here. Report gates call it directly and keep the process exit
+code. `complete()` still selects agy or Ollama for callers that opt in
+via `LLM_BACKEND` (digest, peer reading).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Literal
 
 from agent.tools._paths import ROOT, ensure_paths
@@ -19,8 +22,73 @@ from agent.tools._paths import ROOT, ensure_paths
 BackendName = Literal["agy", "ollama"]
 
 AGY_TIMEOUT_SEC = 900
+# Gates already reject bodies shorter than agy_output_usable's default.
+GATE_MIN_CHARS = 120
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.1"
+
+
+def list_ollama_models(
+    base_url: str | None = None,
+    *,
+    timeout_sec: float = 1.5,
+) -> list[str]:
+    """Return installed Ollama model names (best-effort)."""
+    base = (base_url or os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+    req = urllib.request.Request(f"{base}/api/tags", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return []
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return []
+    names: list[str] = []
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("model") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def resolve_ollama_model(
+    base_url: str | None = None,
+    preferred: str | None = None,
+) -> str:
+    """Pick an installed model; fall back to preferred name if tags unavailable."""
+    preferred_name = (
+        preferred or os.environ.get("OLLAMA_MODEL") or DEFAULT_OLLAMA_MODEL
+    ).strip()
+    installed = list_ollama_models(base_url)
+    if not installed:
+        return preferred_name
+    if preferred_name in installed:
+        return preferred_name
+    pref_base = preferred_name.split(":")[0]
+    for name in installed:
+        if name.startswith(f"{preferred_name}:") or name.split(":")[0] == pref_base:
+            return name
+    for name in installed:
+        if name.startswith("llama3"):
+            return name
+    return installed[0]
+
+
+@dataclass(frozen=True)
+class AgyResult:
+    text: str
+    exit_code: int
+
+
+def agy_executable() -> str:
+    custom = os.environ.get("AGY_BIN", "").strip()
+    agy_bin = custom or shutil.which("agy")
+    if not agy_bin:
+        raise FileNotFoundError("找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。")
+    return agy_bin
 
 
 def resolved_backend() -> BackendName:
@@ -38,15 +106,17 @@ def complete(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
     return complete_agy(prompt, timeout_sec=timeout_sec)
 
 
-def complete_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
+def invoke_agy(
+    prompt: str,
+    *,
+    timeout_sec: int = AGY_TIMEOUT_SEC,
+    min_chars: int = 20,
+) -> AgyResult:
+    """Run one agy prompt. Callers that need a longer body pass min_chars."""
     ensure_paths()
     from agy_output import agy_output_usable, clean_agy_output
 
-    custom = os.environ.get("AGY_BIN", "").strip()
-    agy_bin = custom or shutil.which("agy")
-    if not agy_bin:
-        raise FileNotFoundError("找不到 agy 指令。請安裝 Antigravity CLI 或設定 AGY_BIN。")
-
+    agy_bin = agy_executable()
     try:
         result = subprocess.run(
             [
@@ -67,10 +137,14 @@ def complete_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
 
     raw = result.stdout or result.stderr or ""
     body = clean_agy_output(raw)
-    if not agy_output_usable(body, min_chars=20):
+    if not agy_output_usable(body, min_chars=min_chars):
         detail = body[:200] if body else "(空)"
         raise RuntimeError(f"agy 輸出不可用（exit {result.returncode}）：{detail}")
-    return body
+    return AgyResult(text=body, exit_code=result.returncode)
+
+
+def complete_agy(prompt: str, *, timeout_sec: int = AGY_TIMEOUT_SEC) -> str:
+    return invoke_agy(prompt, timeout_sec=timeout_sec).text
 
 
 def complete_ollama(
@@ -83,7 +157,7 @@ def complete_ollama(
     base = (base_url or os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).rstrip(
         "/"
     )
-    model_name = model or os.environ.get("OLLAMA_MODEL") or DEFAULT_OLLAMA_MODEL
+    model_name = resolve_ollama_model(base_url=base, preferred=model)
     url = f"{base}/api/chat"
     payload = {
         "model": model_name,
