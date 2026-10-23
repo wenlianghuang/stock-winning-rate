@@ -797,6 +797,35 @@ class TestStockReportChatExecution(unittest.TestCase):
         self.assertNotIn("月線", margin)
         self.assertNotIn("外資今天", margin)
 
+    def test_pullback_reply_states_price_path_before_ma20(self) -> None:
+        facts = {
+            **SAMPLE_STOCK_FACTS,
+            "foreign_net_lots": -5438,
+            "foreign_cum_lots": -22000,
+            "major_cum_lots": -8000,
+            "close_vs_ma20_pct": -7.37,
+            "lookback_days": 5,
+            "period_return_pct": -4.2,
+            "price_trend": "down",
+            "dist_to_20d_high_pct": 12.6,
+        }
+        question = "為什麼回檔到這麼深，原因可能出在哪？"
+        reply = build_reading_reply(facts, message=question)
+        self.assertLess(reply.index("近 5 個交易日"), reply.index("月線"))
+        self.assertIn("-4.20%", reply)
+        self.assertIn("12.60%", reply)
+        self.assertIn("不是這段跌幅", reply)
+        self.assertIn("同一段外資累計", reply)
+        self.assertIn("5,438", reply)
+        self.assertIn("這不是預測明天", reply)
+        self.assertNotIn("放在一起讀", reply)
+        self.assertTrue(reading_reply_grounded(reply, facts, question))
+        compact = build_compact_stock_facts(facts)
+        self.assertEqual(compact["period_return_pct"], -4.2)
+        self.assertEqual(compact["lookback_days"], 5)
+        self.assertEqual(compact["dist_to_20d_high_pct"], 12.6)
+        self.assertEqual(compact["major_cum_lots"], -8000)
+
     def test_reading_reply_rejects_invented_numbers_and_flipped_sign(self) -> None:
         grounded = build_reading_reply(
             SAMPLE_STOCK_FACTS,

@@ -252,6 +252,11 @@ READING_PATTERNS = (
 READING_POLICY_EXTRA = (
     "本則補充：使用者在問多個已核對事實放在一起怎麼讀。"
     "可以同時引用 2～4 個 facts 欄位，說明它們同向或互相矛盾。"
+    "若問題在問回檔、跌深或原因，先講價格路徑："
+    "period_return_pct 是 lookback_days 個交易日的收盤漲跌，"
+    "dist_to_20d_high_pct 是收盤離近 20 日高點的距離。"
+    "close_vs_ma20_pct 只是現在離月線的位置，禁止把它說成這段跌幅。"
+    "同一段籌碼用 foreign_cum_lots、major_cum_lots；當天淨額只是這段的最後一天。"
     "禁止編造 facts 沒有的數字，禁止改寫損益金額，禁止下單、目標價、保證漲跌。"
     "買賣超方向必須跟 facts 的正負號一致；使用者把買說成賣（或相反）時，第一句先糾正。"
     "使用者口述張數和報告差一個數量級時，第一句先對數字。"
@@ -1144,6 +1149,12 @@ _DIVERGENCE_SPEAK = {
     "price_down_margin_up": "股價跌、融資卻在增加",
     "price_up_margin_up": "股價漲、融資也在增加",
 }
+_TREND_SPEAK = {
+    "up": "上漲",
+    "down": "下跌",
+    "flat": "幾乎走平",
+    "unknown": "還看不出來",
+}
 _READER_FIELDS = {
     "institutional_consensus": _CONSENSUS_SPEAK,
     "chip_regime": _CHIP_SPEAK,
@@ -1151,6 +1162,7 @@ _READER_FIELDS = {
     "ma_stack": _STACK_SPEAK,
     "ma20_slope": _SLOPE_SPEAK,
     "rsi_zone": _RSI_SPEAK,
+    "price_trend": _TREND_SPEAK,
 }
 
 
@@ -1921,6 +1933,69 @@ def build_inference_reply(
     return _end(f"{prefix}{core}{tail}")
 
 
+def _asks_pullback_depth(message: str) -> bool:
+    """True when the question is about how far price already fell, not a single chip slot."""
+    return (
+        re.search(r"回檔|回落|跌深|跌了|跌幅|這麼深|殺下來|跌下來|跌超過", message or "")
+        is not None
+    )
+
+
+def _has_drawdown_path(facts: dict[str, Any]) -> bool:
+    """A multi-day drop the chart already shows: window return, or distance under the 20-day high."""
+    dist = facts.get("dist_to_20d_high_pct")
+    ret = facts.get("period_return_pct")
+    if isinstance(dist, (int, float)) and not isinstance(dist, bool) and dist >= 1:
+        return True
+    if isinstance(ret, (int, float)) and not isinstance(ret, bool) and ret <= -2:
+        return True
+    return False
+
+
+def _price_path_sentence(facts: dict[str, Any]) -> str:
+    """State the completed price path. MA20 deviation is a level, not this move."""
+    parts: list[str] = []
+    ret = facts.get("period_return_pct")
+    days = facts.get("lookback_days")
+    if isinstance(ret, (int, float)) and not isinstance(ret, bool):
+        if isinstance(days, (int, float)) and not isinstance(days, bool) and int(days) > 0:
+            window = f"近 {int(days)} 個交易日"
+        else:
+            window = "這段區間"
+        parts.append(f"{window}收盤 {_fmt_pct(ret)}")
+    dist = facts.get("dist_to_20d_high_pct")
+    if isinstance(dist, (int, float)) and not isinstance(dist, bool) and dist >= 1:
+        parts.append(f"收盤離近二十日高點 {float(dist):.2f}%")
+    if not parts:
+        return ""
+    return "。".join(parts) + "。"
+
+
+def _window_chip_sentence(facts: dict[str, Any]) -> str:
+    """Chips over the same window as the price path. Today's print is a separate sentence."""
+    bits: list[str] = []
+    foreign_cum = facts.get("foreign_cum_lots")
+    major_cum = facts.get("major_cum_lots")
+    if isinstance(foreign_cum, (int, float)) and not isinstance(foreign_cum, bool):
+        bits.append(f"同一段外資累計{_flow_phrase(foreign_cum)}")
+    if isinstance(major_cum, (int, float)) and not isinstance(major_cum, bool):
+        bits.append(f"主力累計{_flow_phrase(major_cum)}")
+    if not bits:
+        return ""
+    return "，".join(bits) + "。"
+
+
+def _path_block(facts: dict[str, Any]) -> str:
+    path = _price_path_sentence(facts)
+    if not path:
+        return ""
+    note = ""
+    ma20 = facts.get("close_vs_ma20_pct")
+    if isinstance(ma20, (int, float)) and not isinstance(ma20, bool):
+        note = f"{_ma_side(ma20)}。這是現在離月線的位置，不是這段跌幅。"
+    return f"{path}{_window_chip_sentence(facts)}{note}"
+
+
 def _reading_focuses(message: str) -> list[str]:
     """Which fact groups the question actually names. Empty means a general risk read."""
     msg = message or ""
@@ -2024,12 +2099,11 @@ def _reading_section(focus: str, facts: dict[str, Any], focuses: list[str]) -> s
         if not isinstance(rsi, (int, float)):
             return "這份報告沒有強弱指標。"
         return f"強弱指標大概 {rsi:.1f}，{_speak(zone, _RSI_SPEAK)}。"
-    # Generic risk: only the stresses that are actually on, otherwise say nothing is broken.
+    # Generic risk: the completed price path first, then today's print.
+    # close vs MA20 is where price sits now, not how far it fell.
     stresses: list[str] = []
     if isinstance(foreign, (int, float)) and foreign < 0:
         stresses.append(f"外資今天{_flow_phrase(foreign)}")
-    if isinstance(ma20, (int, float)) and ma20 < 0:
-        stresses.append(_ma_side(ma20))
     zone = facts.get("rsi_zone")
     rsi = facts.get("rsi_14")
     if zone in ("overbought", "oversold") and isinstance(rsi, (int, float)):
@@ -2037,6 +2111,11 @@ def _reading_section(focus: str, facts: dict[str, Any], focuses: list[str]) -> s
     margin = facts.get("margin_today_delta_lots")
     if isinstance(margin, (int, float)) and margin > 0:
         stresses.append(f"融資今天{_flow_phrase(margin)}")
+    if _has_drawdown_path(facts):
+        today = ("今天這邊是：" + "；".join(stresses) + "。") if stresses else ""
+        return f"{_path_block(facts)}{today}"
+    if isinstance(ma20, (int, float)) and ma20 < 0:
+        stresses.append(_ma_side(ma20))
     if not stresses:
         side = _ma_side(ma20)
         return (
@@ -2161,10 +2240,17 @@ def build_reading_reply(
         body = _reading_implication(f, focuses, angle=_implication_angle(asked))
         return _end(f"{prefix}就 {label} 來說，{body}")
     body = "".join(_reading_section(focus, f, focuses) for focus in focuses)
-    return _end(
-        f"{prefix}就 {label} 報告數字一起看：{body}"
-        f"這是把問到的欄位放在一起讀，不是預測明天。"
+    include_path = _has_drawdown_path(f) and (
+        focuses == ["risk"] or _asks_pullback_depth(asked)
     )
+    if include_path and focuses != ["risk"]:
+        body = _path_block(f) + body
+    closer = (
+        "這不是預測明天。"
+        if include_path
+        else "這是把問到的欄位放在一起讀，不是預測明天。"
+    )
+    return _end(f"{prefix}就 {label} 報告數字一起看：{body}{closer}")
 
 
 def _material_numbers(text: str) -> list[float]:
@@ -2295,7 +2381,12 @@ def build_compact_stock_facts(facts: dict[str, Any] | None) -> dict[str, Any]:
         "dealer_net_lots": facts.get("dealer_net_lots"),
         "major_net_lots": facts.get("major_net_lots"),
         "foreign_cum_lots": facts.get("foreign_cum_lots"),
+        "major_cum_lots": facts.get("major_cum_lots"),
         "foreign_streak_days": facts.get("foreign_streak_days"),
+        "lookback_days": facts.get("lookback_days"),
+        "period_return_pct": facts.get("period_return_pct"),
+        "price_trend": facts.get("price_trend"),
+        "dist_to_20d_high_pct": facts.get("dist_to_20d_high_pct"),
         "today_change_pct": facts.get("today_change_pct"),
         "close_vs_ma5_pct": facts.get("close_vs_ma5_pct"),
         "close_vs_ma20_pct": facts.get("close_vs_ma20_pct"),
@@ -2559,6 +2650,10 @@ def prepare_stock_report_chat(
                 "使用者在問這些數字放在一起怎麼讀（為什麼、代表什麼、風險在哪）。"
                 "只串問題點名的欄位：主力就談主力與外資是否對作，融資就談融資券，"
                 "背離就談背離，均線／月線就談均線，外資就談外資。"
+                "若問題在問回檔、跌深或原因，第一句先講價格路徑："
+                "近 lookback_days 個交易日的 period_return_pct，以及 dist_to_20d_high_pct。"
+                "close_vs_ma20_pct 是現在離月線的位置，禁止把它說成這段跌幅。"
+                "同一段籌碼用累計張數；今天的淨額只是這段的最後一天。"
                 "不要每題都補外資和月線。不要只報今天買超或賣超幾張。"
                 "不要預測明天，不要下單。禁止寫出 facts 沒有的數字。"
             ),
