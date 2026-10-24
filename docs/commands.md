@@ -103,6 +103,14 @@ uv run --extra ui --extra stock python main.py portfolio-gate -- --mode theme --
 
 草稿在 `reports/digest/{日期}/peer_{本檔代號}_{對照代號}.md`。對照池是 `concept_peers_universe.json`，不進投組。網站目前不在這張圖裡補抓；沒有同日 facts 就停。
 
+族群狀態板（台股頁籤「族群比較」）跟上面的一對一信件分開。它只讀同日 facts，不判強弱、不寫部位：
+
+- `GET /concept-groups`：主題與成員
+- `GET /concept-board?theme=pcb&date=YYYY-MM-DD`：該主題每一檔的收盤、漲跌、區間報酬、外資、籌碼、相對大盤
+- `ids=8046,3037` 可收成一小群；同時給 `theme` 時取交集
+- `fetch=true` 才向 Yahoo 股市補缺檔（收盤、漲跌、外資、主力），寫進 `tw_stock_{代號}.yahoo_board.json`，不打 FinMind、不覆蓋 facts.json。預設只讀磁碟上已有的 facts 或這份 sidecar
+- `GET /concept-board/brief?ids=3324,3017&date=YYYY-MM-DD&held=3017`：勾選的股票平等比較。近五個交易日的報酬，對上外資、投信、自營是否同向。有持股才寫換檔或續抱；沒有持股只寫是否值得觀察入場。不寫張數，不呼叫模型
+
 ---
 
 ## 美股科技新聞

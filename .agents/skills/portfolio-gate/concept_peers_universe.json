@@ -800,8 +800,7 @@
       "category": "theme_stock",
       "sector": "semiconductor",
       "themes": [
-        "semiconductor",
-        "thermal"
+        "semiconductor"
       ],
       "defensive": false
     },
@@ -812,8 +811,7 @@
       "category": "theme_stock",
       "sector": "pcb",
       "themes": [
-        "pcb",
-        "thermal"
+        "pcb"
       ],
       "defensive": false
     },

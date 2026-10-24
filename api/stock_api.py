@@ -537,6 +537,283 @@ def _ensure_stock_facts(
     return facts, resolved, close
 
 
+def _majority_date(dates: list[str]) -> str | None:
+    counts: dict[str, int] = {}
+    for day in dates:
+        if day:
+            counts[day] = counts.get(day, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=lambda day: (counts[day], day))
+
+
+def _yahoo_board_name(stock_id: str) -> str:
+    return f"tw_stock_{stock_id}.yahoo_board.json"
+
+
+def _load_yahoo_board(
+    stock_id: str,
+    trade_date: str | None,
+) -> tuple[dict[str, Any] | None, str | None, float | None]:
+    """Sidecar written by the Yahoo board refill. Never the full facts.json."""
+    _ensure_import_paths()
+    from stock_paths import find_stock_artifact
+
+    path = find_stock_artifact(
+        stock_id,
+        _yahoo_board_name(stock_id),
+        trade_date=trade_date,
+        root=ROOT,
+    )
+    payload = _load_facts_json(path)
+    if not isinstance(payload, dict):
+        return None, None, None
+    fact_date = str(payload.get("trade_date") or "") or None
+    if trade_date and fact_date and fact_date != trade_date:
+        return None, None, None
+    close = _to_float(payload.get("close"))
+    return payload, fact_date, close
+
+
+def _read_board_facts(
+    stock_id: str,
+    trade_date: str | None,
+) -> tuple[dict[str, Any] | None, str | None, float | None]:
+    """Read same-day facts, then the Yahoo sidecar. A different day counts as missing."""
+    facts, resolved, close = _ensure_stock_facts(stock_id, trade_date, fetch=False)
+    if isinstance(facts, dict):
+        fact_date = str(facts.get("trade_date") or resolved or "") or None
+        if not trade_date or not fact_date or fact_date == trade_date:
+            return facts, fact_date, close
+    return _load_yahoo_board(stock_id, trade_date)
+
+
+def _write_yahoo_board(facts: dict[str, Any]) -> None:
+    _ensure_import_paths()
+    from stock_paths import stock_artifact_dir
+
+    stock_id = str(facts["stock_id"])
+    trade_date = str(facts["trade_date"])
+    folder = stock_artifact_dir(trade_date, stock_id, root=ROOT, mkdir=True)
+    path = folder / _yahoo_board_name(stock_id)
+    if "week" not in facts and path.is_file():
+        previous = _load_facts_json(path)
+        week = previous.get("week") if isinstance(previous, dict) else None
+        if isinstance(week, dict) and str(week.get("trade_date") or "") == trade_date:
+            facts = dict(facts)
+            facts["week"] = week
+    path.write_text(json.dumps(facts, ensure_ascii=False), encoding="utf-8")
+
+
+def _cached_week(stock_id: str, trade_date: str | None) -> dict[str, Any] | None:
+    payload, _fact_date, _close = _load_yahoo_board(stock_id, trade_date)
+    week = payload.get("week") if isinstance(payload, dict) else None
+    if not isinstance(week, dict):
+        return None
+    if trade_date and str(week.get("trade_date") or "") != trade_date:
+        return None
+    sessions = week.get("sessions") or []
+    if len(sessions) < 5:
+        return None
+    if week.get("week_trust_net_lots") is None or week.get("week_dealer_net_lots") is None:
+        return None
+    if any(not isinstance(item, dict) or item.get("foreign_net_lots") is None for item in sessions):
+        return None
+    return week
+
+
+def _store_week(stock_id: str, stock_name: str | None, week: dict[str, Any]) -> None:
+    trade_date = str(week.get("trade_date") or "")
+    if not trade_date:
+        return
+    payload, _fact_date, _close = _load_yahoo_board(stock_id, trade_date)
+    if not isinstance(payload, dict):
+        payload = {
+            "stock_id": stock_id,
+            "stock_name": stock_name or stock_id,
+            "trade_date": trade_date,
+            "source": "yahoo",
+        }
+    payload["week"] = week
+    payload["stock_id"] = stock_id
+    payload["trade_date"] = trade_date
+    _write_yahoo_board(payload)
+
+
+def _with_week(row: dict[str, Any], week: dict[str, Any] | None) -> dict[str, Any]:
+    if not week:
+        return row
+    merged = dict(row)
+    merged["week_return_pct"] = week.get("week_return_pct")
+    merged["week_foreign_net_lots"] = week.get("week_foreign_net_lots")
+    merged["week_trust_net_lots"] = week.get("week_trust_net_lots")
+    merged["week_dealer_net_lots"] = week.get("week_dealer_net_lots")
+    merged["rs_period"] = week.get("rs_period")
+    if week.get("week_return_pct") is not None:
+        merged["available"] = True
+    return merged
+
+
+def _attach_week_rows(
+    rows: list[dict[str, Any]],
+    trade_date: str | None,
+) -> list[dict[str, Any]]:
+    """Fill five-session return and foreign sum from the sidecar, else Yahoo."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from yahoo_board import fetch_market_bars, fetch_week_window
+
+    pending: list[dict[str, Any]] = []
+    ready: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        stock_id = str(row.get("stock_id") or "")
+        week = _cached_week(stock_id, trade_date or row.get("trade_date"))
+        if week:
+            ready[stock_id] = week
+        else:
+            pending.append(row)
+    if pending:
+        market = fetch_market_bars()
+
+        def one(row: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+            stock_id = str(row.get("stock_id") or "")
+            try:
+                week = fetch_week_window(
+                    stock_id,
+                    trade_date or row.get("trade_date"),
+                    market_bars=market,
+                )
+            except Exception:
+                return stock_id, None
+            if week:
+                _store_week(stock_id, str(row.get("stock_name") or "") or None, week)
+            return stock_id, week
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(one, row) for row in pending]
+            for future in as_completed(futures):
+                stock_id, week = future.result()
+                if week:
+                    ready[stock_id] = week
+    return [_with_week(row, ready.get(str(row.get("stock_id") or ""))) for row in rows]
+
+
+def _refill_board_facts(
+    stock_ids: list[str],
+    trade_date: str | None,
+    names: dict[str, str] | None = None,
+) -> str | None:
+    """Fill missing board rows from Yahoo. Does not call FinMind or overwrite facts.json."""
+    if not stock_ids:
+        return None
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from yahoo_board import fetch_market_bars, fetch_yahoo_board_facts
+
+    market = fetch_market_bars()
+    failed: list[str] = []
+
+    def one(stock_id: str) -> str | None:
+        try:
+            facts = fetch_yahoo_board_facts(
+                stock_id,
+                trade_date,
+                market_bars=market,
+                stock_name=(names or {}).get(stock_id) or None,
+            )
+        except Exception:
+            return stock_id
+        if not isinstance(facts, dict):
+            return stock_id
+        day = str(facts.get("trade_date") or "")
+        if trade_date and day != trade_date:
+            return stock_id
+        if not day:
+            return stock_id
+        _write_yahoo_board(facts)
+        return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(one, stock_id) for stock_id in stock_ids]
+        for future in as_completed(futures):
+            missing = future.result()
+            if missing:
+                failed.append(missing)
+    if failed:
+        return "Yahoo 沒有補到：" + "、".join(sorted(failed))
+    return None
+
+
+def build_concept_board(
+    *,
+    theme_id: str | None,
+    stock_ids: list[str] | None,
+    trade_date: str | None,
+    fetch: bool,
+) -> dict[str, Any]:
+    """Same-day status rows for a theme or a short id list. Does not score stance."""
+    _ensure_import_paths()
+    _ensure_portfolio_paths()
+    from concept_compare import board_row_from_facts, resolve_board_members
+
+    resolved = resolve_board_members(theme_id=theme_id, stock_ids=stock_ids)
+    if not resolved["ok"]:
+        raise HTTPException(status_code=400, detail=resolved["error"] or "無法組成比較表")
+
+    loaded: dict[str, tuple[dict[str, Any] | None, str | None, float | None]] = {}
+    missing: list[str] = []
+    for member in resolved["members"]:
+        sid = str(member["stock_id"])
+        facts, fact_date, close = _read_board_facts(sid, trade_date)
+        loaded[sid] = (facts, fact_date, close)
+        if facts is None:
+            missing.append(sid)
+
+    warnings: list[str] = []
+    if resolved.get("warning"):
+        warnings.append(str(resolved["warning"]))
+    skipped = resolved.get("skipped") or []
+    if skipped:
+        warnings.append("略過不在此範圍的代號：" + "、".join(skipped))
+
+    if fetch and missing:
+        try:
+            refill_warning = _refill_board_facts(
+            missing,
+            trade_date,
+            {
+                str(member["stock_id"]): str(member.get("stock_name") or "")
+                for member in resolved["members"]
+            },
+        )
+        except Exception as exc:
+            refill_warning = str(exc)
+        if refill_warning:
+            warnings.append(refill_warning)
+        for sid in missing:
+            facts, fact_date, close = _read_board_facts(sid, trade_date)
+            loaded[sid] = (facts, fact_date, close)
+
+    present_dates = [item[1] for item in loaded.values() if item[1]]
+    board_date = trade_date or _majority_date([day for day in present_dates if day])
+    rows = [
+        board_row_from_facts(
+            member,
+            loaded[str(member["stock_id"])][0],
+            close=loaded[str(member["stock_id"])][2],
+            board_date=board_date,
+        )
+        for member in resolved["members"]
+    ]
+    return {
+        "theme_id": resolved.get("theme_id"),
+        "trade_date": board_date,
+        "rows": rows,
+        "warnings": warnings,
+        "missing": [row["stock_id"] for row in rows if not row["available"]],
+    }
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -1192,6 +1469,81 @@ def create_app() -> FastAPI:
                 detail=f"找不到 {stock_id} 與 {peer_id} 的可比較資料。",
             )
         return comparison
+
+    @app.get("/concept-groups")
+    def concept_groups() -> dict[str, Any]:
+        """Theme catalog for the group board. Members include every stock in the theme."""
+        _ensure_import_paths()
+        _ensure_portfolio_paths()
+        from concept_compare import list_concept_groups
+
+        return list_concept_groups()
+
+    @app.get("/concept-board")
+    def concept_board(
+        theme: str | None = None,
+        ids: str | None = None,
+        date: str | None = None,
+        fetch: bool = False,
+    ) -> dict[str, Any]:
+        """Same-day chip status for one theme, a short id list, or their intersection.
+
+        ``fetch=true`` fills gaps from Yahoo 股市 (price, 三大法人, optional 主力)
+        into a sidecar. It does not call FinMind or overwrite facts.json.
+        Pairwise stance and the peer letter stay on ``/stocks/{id}/compare/{peer}``.
+        """
+        theme_id = theme.strip().lower() if theme else None
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+        stock_ids = [part.strip() for part in (ids or "").split(",") if part.strip()]
+        if any(not re.match(r"^\d{4,6}$", sid) for sid in stock_ids):
+            raise HTTPException(status_code=400, detail="ids 須為 4～6 位數台股代號")
+        if len(stock_ids) > 40:
+            raise HTTPException(status_code=400, detail="一次最多 40 檔")
+        if not theme_id and not stock_ids:
+            raise HTTPException(status_code=400, detail="請指定主題或代號")
+        return build_concept_board(
+            theme_id=theme_id,
+            stock_ids=stock_ids or None,
+            trade_date=date,
+            fetch=fetch,
+        )
+
+    @app.get("/concept-board/brief")
+    def concept_board_brief(
+        ids: str,
+        date: str | None = None,
+        held: str | None = None,
+    ) -> dict[str, Any]:
+        """Five-session entry or switch note for a checked subgroup."""
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+        stock_ids = [part.strip() for part in ids.split(",") if part.strip()]
+        held_ids = [part.strip() for part in (held or "").split(",") if part.strip()]
+        if len(stock_ids) < 2:
+            raise HTTPException(status_code=400, detail="至少勾選兩檔")
+        if len(stock_ids) > 12:
+            raise HTTPException(status_code=400, detail="一次對照最多 12 檔")
+        if any(not re.match(r"^\d{4,6}$", sid) for sid in stock_ids + held_ids):
+            raise HTTPException(status_code=400, detail="ids 須為 4～6 位數台股代號")
+        board = build_concept_board(
+            theme_id=None,
+            stock_ids=stock_ids,
+            trade_date=date,
+            fetch=False,
+        )
+        from concept_compare import build_group_brief
+
+        rows = _attach_week_rows(board["rows"], board.get("trade_date") or date)
+        order = {sid: index for index, sid in enumerate(stock_ids)}
+        rows.sort(key=lambda row: order.get(str(row.get("stock_id")), 999))
+        brief = build_group_brief(
+            rows,
+            trade_date=board.get("trade_date"),
+            held_ids=[sid for sid in held_ids if sid in set(stock_ids)],
+        )
+        brief["warnings"] = board.get("warnings") or []
+        return brief
 
     @app.get("/us-indices")
     def us_indices() -> dict[str, Any]:
