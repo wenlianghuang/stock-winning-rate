@@ -85,6 +85,11 @@
       "label": "散熱",
       "style": "cyclical",
       "risk_hint": "題材／景氣循環色彩較濃，波動通常高於金融"
+    },
+    "space": {
+      "label": "太空",
+      "style": "growth",
+      "risk_hint": "題材驅動，波動通常高"
     }
   },
   "candidates": [
@@ -809,9 +814,9 @@
       "name": "昇貿",
       "asset_class": "stock",
       "category": "theme_stock",
-      "sector": "pcb",
+      "sector": "space",
       "themes": [
-        "pcb"
+        "space"
       ],
       "defensive": false
     },
@@ -1176,6 +1181,96 @@
       "sector": "optical_comms",
       "themes": [
         "optical_comms"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6805",
+      "name": "富世達",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8996",
+      "name": "高力",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2486",
+      "name": "一詮",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3013",
+      "name": "晟銘電",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "3044",
+      "name": "健鼎",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2313",
+      "name": "華通",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb",
+        "space"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "5469",
+      "name": "瀚宇博",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb",
+        "servers"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6274",
+      "name": "台燿",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "pcb",
+      "themes": [
+        "pcb"
       ],
       "defensive": false
     }

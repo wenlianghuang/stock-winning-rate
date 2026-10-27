@@ -7,6 +7,9 @@ The default planner is rule-based (golden intents, no LLM). An external model
 may only emit the same plan JSON (``--plan-json``); schema + policy run before
 any tool. Execution failures use rules to retry once on missing CSV, skip
 position without Research facts, block send_digest, and stop at the tool budget.
+
+process_holdings is two-phase: fetch → triage_watchlist runs first, then
+``expand_after_triage`` inserts report/position gates for the picks only.
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from agent.policy import (
     INTENT_MARKET_OUTLOOK,
     INTENT_PROCESS_HOLDINGS,
     INTENT_STOCK_DECISION,
+    INTENT_WATCHLIST_SCAN,
     KNOWN_ROLES,
     NEEDS_CSV_TOOLS,
     ROLE_DATA,
@@ -56,8 +60,10 @@ from agent.policy import (
     allow_position,
     allow_position_handoff,
     allow_send_digest,
+    fit_picks_to_budget,
     is_actionable_holding,
     notify_may_include,
+    notify_may_include_triage_line,
     role_for_intent,
     should_retry_after_csv_missing,
     tool_allowed_for_role,
@@ -65,6 +71,7 @@ from agent.policy import (
 )
 from agent.tools._paths import ROOT
 from agent.tools._types import EXIT_BAD_ARGS, EXIT_FAILED, EXIT_HOLDING_MISSING, EXIT_OK
+from agent.tools.triage import DEFAULT_TOP_K, SOURCE_HOLDINGS, SOURCE_WATCHLIST, format_triage
 
 Dispatch = Callable[[str, dict[str, Any]], Any]
 
@@ -98,6 +105,17 @@ DECISION_MARKERS = (
     "要不要買",
     "怎麼辦",
 )
+SCAN_MARKERS = (
+    "觀察名單",
+    "掃一下",
+    "掃描",
+    "分流",
+    "哪幾檔要注意",
+    "哪些要注意",
+    "哪幾檔需要注意",
+    "要注意哪",
+)
+WATCHLIST_MARKERS = ("觀察名單", "watchlist", "自選")
 
 
 @dataclass
@@ -165,6 +183,7 @@ class AgentContext:
     run_id: str | None = None
     audit_enabled: bool = False
     audit_path: Path | str | None = None
+    triage_top_k: int = DEFAULT_TOP_K
 
 
 @dataclass
@@ -194,6 +213,8 @@ class AgentRun:
 def classify_intent(text: str) -> ClassifiedIntent:
     stripped = (text or "").strip()
     stocks = list(dict.fromkeys(STOCK_RE.findall(stripped)))
+    if any(marker in stripped for marker in SCAN_MARKERS):
+        return ClassifiedIntent(kind=INTENT_WATCHLIST_SCAN, text=stripped, stocks=stocks)
     if any(marker in stripped for marker in PROCESS_MARKERS) or (
         "持股" in stripped and any(token in stripped for token in ("處理", "今天", "幫我"))
     ):
@@ -392,6 +413,7 @@ def build_plan(
     skip_tavily: bool = True,
     max_rounds: int = DEFAULT_MAX_GATE_ROUNDS,
     permissions: Permissions | None = None,
+    triage_top_k: int = DEFAULT_TOP_K,
 ) -> Plan:
     if classified.kind == INTENT_PROCESS_HOLDINGS:
         plan = _plan_process_holdings(
@@ -399,8 +421,15 @@ def build_plan(
             trade_date=trade_date,
             holdings=holdings,
             csv_missing=csv_missing,
-            skip_pdf=skip_pdf,
-            max_rounds=max_rounds,
+            triage_top_k=triage_top_k,
+        )
+    elif classified.kind == INTENT_WATCHLIST_SCAN:
+        plan = _plan_watchlist_scan(
+            classified,
+            trade_date=trade_date,
+            holdings=holdings,
+            csv_missing=csv_missing,
+            triage_top_k=triage_top_k,
         )
     elif classified.kind == INTENT_STOCK_DECISION:
         plan = _plan_stock_decision(
@@ -437,17 +466,74 @@ def _gate_args(
     return args
 
 
+def _deep_dive_steps(
+    stock_ids: list[str],
+    holdings: dict[str, dict[str, Any]],
+    *,
+    trade_date: str | None,
+    skip_pdf: bool,
+    max_rounds: int,
+    reasons: dict[str, str] | None = None,
+) -> tuple[list[PlanStep], list[str]]:
+    steps: list[PlanStep] = []
+    notes: list[str] = []
+    for stock_id in stock_ids:
+        why = (reasons or {}).get(stock_id)
+        steps.append(
+            PlanStep(
+                tool="run_report_gate",
+                args=_gate_args(stock_id, trade_date, skip_pdf, max_rounds),
+                reason=f"分流選中：{why}" if why else f"{stock_id} 深度報告",
+            )
+        )
+        allowed, reason = allow_position(stock_id, holdings)
+        if allowed:
+            pos_args = _gate_args(stock_id, trade_date, skip_pdf, max_rounds)
+            pos_args["from_holdings_file"] = True
+            steps.append(PlanStep(tool="run_position_gate", args=pos_args, reason=reason))
+        else:
+            notes.append(reason)
+    return steps, notes
+
+
+def _fetch_missing_step(
+    stock_ids: list[str], csv_missing: set[str], trade_date: str | None, reason: str
+) -> list[PlanStep]:
+    missing = [sid for sid in stock_ids if sid in csv_missing]
+    if not missing:
+        return []
+    args: dict[str, Any] = {"stocks": missing}
+    if trade_date:
+        args["trade_date"] = trade_date
+    return [PlanStep(tool="fetch_chips", args=args, reason=reason)]
+
+
+def _triage_step(
+    stock_ids: list[str] | None,
+    held: list[str],
+    *,
+    trade_date: str | None,
+    top_k: int,
+    source: str,
+    reason: str,
+) -> PlanStep:
+    args: dict[str, Any] = {"held": held, "top_k": top_k, "source": source}
+    if stock_ids:
+        args["stocks"] = stock_ids
+    if trade_date:
+        args["trade_date"] = trade_date
+    return PlanStep(tool="triage_watchlist", args=args, reason=reason)
+
+
 def _plan_process_holdings(
     classified: ClassifiedIntent,
     *,
     trade_date: str | None,
     holdings: dict[str, dict[str, Any]],
     csv_missing: set[str],
-    skip_pdf: bool,
-    max_rounds: int,
+    triage_top_k: int,
 ) -> Plan:
     notes: list[str] = []
-    steps: list[PlanStep] = []
     stock_ids = [sid for sid, record in holdings.items() if is_actionable_holding(record)]
     if not stock_ids:
         return Plan(
@@ -459,28 +545,18 @@ def _plan_process_holdings(
             digest_status=DIGEST_SKIPPED,
         )
 
-    missing = [sid for sid in stock_ids if sid in csv_missing]
-    if missing:
-        args: dict[str, Any] = {"stocks": missing}
-        if trade_date:
-            args["trade_date"] = trade_date
-        steps.append(PlanStep(tool="fetch_chips", args=args, reason="持股缺 CSV，先 Data"))
-
-    for stock_id in stock_ids:
-        steps.append(
-            PlanStep(
-                tool="run_report_gate",
-                args=_gate_args(stock_id, trade_date, skip_pdf, max_rounds),
-                reason=f"{stock_id} 深度報告",
-            )
+    steps = _fetch_missing_step(stock_ids, csv_missing, trade_date, "持股缺 CSV，先 Data")
+    steps.append(
+        _triage_step(
+            stock_ids,
+            stock_ids,
+            trade_date=trade_date,
+            top_k=triage_top_k,
+            source=SOURCE_HOLDINGS,
+            reason="先用 facts 分流，只有今天有變化的持股才跑 agy",
         )
-        allowed, reason = allow_position(stock_id, holdings)
-        if allowed:
-            pos_args = _gate_args(stock_id, trade_date, skip_pdf, max_rounds)
-            pos_args["from_holdings_file"] = True
-            steps.append(PlanStep(tool="run_position_gate", args=pos_args, reason=reason))
-        else:
-            notes.append(reason)
+    )
+    notes.append("深挖步驟（report／position gate）在 triage_watchlist 之後依結果排入")
 
     digest_args: dict[str, Any] = {}
     if trade_date:
@@ -500,6 +576,51 @@ def _plan_process_holdings(
         steps=steps,
         notes=notes,
         digest_status=DIGEST_PENDING,
+    )
+
+
+def _plan_watchlist_scan(
+    classified: ClassifiedIntent,
+    *,
+    trade_date: str | None,
+    holdings: dict[str, dict[str, Any]],
+    csv_missing: set[str],
+    triage_top_k: int,
+) -> Plan:
+    held = [sid for sid, record in holdings.items() if is_actionable_holding(record)]
+    wants_watchlist = any(marker in classified.text for marker in WATCHLIST_MARKERS)
+    notes = ["只分流、不跑 agy；要深挖請再對選中的代號問「要不要動」"]
+    if classified.stocks:
+        stock_ids: list[str] | None = list(classified.stocks)
+        source = SOURCE_HOLDINGS
+    elif held and not wants_watchlist:
+        stock_ids = held
+        source = SOURCE_HOLDINGS
+    else:
+        stock_ids = None
+        source = SOURCE_WATCHLIST
+        notes.append("讀 watchlist.txt；清單內缺 CSV 的會列在缺資料，不自動抓")
+
+    steps: list[PlanStep] = []
+    if stock_ids:
+        steps.extend(_fetch_missing_step(stock_ids, csv_missing, trade_date, "缺 CSV，先 Data"))
+    steps.append(
+        _triage_step(
+            stock_ids,
+            held,
+            trade_date=trade_date,
+            top_k=triage_top_k,
+            source=source,
+            reason="列出今天狀態有變化的標的",
+        )
+    )
+    return Plan(
+        intent=classified.text,
+        intent_kind=INTENT_WATCHLIST_SCAN,
+        trade_date=trade_date,
+        steps=steps,
+        notes=notes,
+        digest_status=DIGEST_NA,
     )
 
 
@@ -642,6 +763,14 @@ def _summarize(
     if tool == "get_holdings":
         holdings = payload.get("holdings") or {}
         return f"{len(holdings)} 檔"
+    if tool == "triage_watchlist":
+        if not payload.get("ok"):
+            return str(payload.get("error") or "triage failed")
+        picks = payload.get("picks") or []
+        skipped = payload.get("skipped") or []
+        missing = payload.get("missing") or []
+        picked = ", ".join(picks) if picks else "無"
+        return f"深挖 {picked}｜略過 {len(skipped)} 檔｜缺資料 {len(missing)} 檔"
     if tool == "get_last_trading_date":
         return str(payload.get("trade_date") or payload.get("error") or "")
     return "ok" if payload.get("ok") else str(payload.get("error") or "failed")
@@ -664,6 +793,10 @@ def default_dispatch(tool: str, args: dict[str, Any]) -> Any:
         from agent.tools.chips import build_chip_facts
 
         return build_chip_facts(**args)
+    if tool == "triage_watchlist":
+        from agent.tools.triage import triage_watchlist
+
+        return triage_watchlist(**args)
     if tool == "run_report_gate":
         from agent.tools.report import run_report_gate
 
@@ -921,6 +1054,76 @@ def _mark_research_artifact(
         artifacts[stock_id].pop("markdown", None)
 
 
+def expand_after_triage(
+    plan: Plan,
+    insert_at: int,
+    triage: StepResult,
+    holdings: dict[str, dict[str, Any]],
+    *,
+    budget: Budget,
+    csv_missing: set[str],
+    permissions: Permissions,
+    skip_pdf: bool,
+    max_rounds: int,
+) -> list[str]:
+    """Second-phase plan: insert gates for triage picks only. Returns notes.
+
+    Only process_holdings expands; a watchlist scan stops at the table.
+    The new steps go through the same apply_policy as the first phase.
+    """
+    if plan.intent_kind != INTENT_PROCESS_HOLDINGS:
+        return []
+    notes: list[str] = []
+    payload = triage.result or {}
+    if triage.ok and not triage.skipped:
+        picks = [str(sid) for sid in payload.get("picks") or []]
+        reasons = {
+            str(row["stock_id"]): str(row.get("summary") or "")
+            for row in payload.get("rows") or []
+            if row.get("picked")
+        }
+    else:
+        picks = [sid for sid, record in holdings.items() if is_actionable_holding(record)]
+        reasons = {}
+        notes.append(f"分流失敗（{triage.error or triage.skip_reason}），改為全部持股深挖")
+
+    kept, dropped = fit_picks_to_budget(
+        picks,
+        holdings,
+        remaining_calls=budget.remaining_calls(),
+        remaining_sec=budget.max_elapsed_sec - budget.elapsed_sec(),
+    )
+    if dropped:
+        notes.append(f"tool budget 不足，未深挖：{', '.join(dropped)}")
+    if not kept:
+        notes.append("分流後沒有需要深挖的持股，不跑 agy gate")
+        return notes
+
+    steps, step_notes = _deep_dive_steps(
+        kept,
+        holdings,
+        trade_date=plan.trade_date,
+        skip_pdf=skip_pdf,
+        max_rounds=max_rounds,
+        reasons=reasons,
+    )
+    checked = apply_policy(
+        Plan(
+            intent=plan.intent,
+            intent_kind=plan.intent_kind,
+            trade_date=plan.trade_date,
+            steps=steps,
+        ),
+        holdings,
+        csv_missing=csv_missing,
+        permissions=permissions,
+    )
+    plan.steps[insert_at:insert_at] = checked.steps
+    notes.extend(step_notes)
+    notes.extend(checked.notes)
+    return notes
+
+
 def run_agent(
     intent: str,
     context: AgentContext | None = None,
@@ -977,6 +1180,7 @@ def run_agent(
             skip_tavily=ctx.skip_tavily,
             max_rounds=ctx.max_rounds,
             permissions=perms,
+            triage_top_k=ctx.triage_top_k,
         )
     else:
         if not plan.trade_date:
@@ -1017,6 +1221,33 @@ def run_agent(
     )
 
     if ctx.dry_run:
+        triage_at = next(
+            (i for i, step in enumerate(built.steps) if step.tool == "triage_watchlist"), None
+        )
+        if triage_at is not None:
+            triage_step = built.steps[triage_at]
+            triage = _call(
+                runner,
+                budget,
+                triage_step.tool,
+                triage_step.args,
+                reason=f"{triage_step.reason}（dry-run 也跑：唯讀、不呼叫 agy；尚未 fetch 的檔列為缺資料）",
+            )
+            run.probes.append(triage)
+            _audit_step(audit, triage)
+            expand_notes = expand_after_triage(
+                built,
+                triage_at + 1,
+                triage,
+                holdings,
+                budget=budget,
+                csv_missing=csv_missing,
+                permissions=perms,
+                skip_pdf=ctx.skip_pdf,
+                max_rounds=ctx.max_rounds,
+            )
+            built.notes.extend(expand_notes)
+            run.notes.extend(expand_notes)
         run.ok = True
         run.exit_code = EXIT_OK
         run.budget_calls = budget.calls
@@ -1026,6 +1257,7 @@ def run_agent(
         return run
 
     artifacts: dict[str, dict[str, Any]] = {}
+    triage_rows: list[dict[str, Any]] = []
     report_ok: dict[str, bool] = {}
     facts_ready: dict[str, bool] = {}
     fetched: set[str] = set()
@@ -1060,7 +1292,10 @@ def run_agent(
         )
         return step_result
 
-    for step in built.steps:
+    index = 0
+    while index < len(built.steps):
+        step = built.steps[index]
+        index += 1
         allowed_role, role_reason = tool_allowed_for_role(step.tool, perms.role)
         if not allowed_role:
             skipped = _call(
@@ -1117,7 +1352,7 @@ def run_agent(
                 continue
 
         if step.tool == "draft_digest":
-            items = _digest_items(artifacts, trade_date)
+            items = _digest_items(artifacts, trade_date, triage_rows)
             if not items:
                 skip_reason = "沒有已通過 gate 的成品，Notify 略過 draft_digest"
                 skipped = _call(
@@ -1169,6 +1404,23 @@ def run_agent(
             stocks = outcome.args.get("stocks") or []
             fetched.update(str(item) for item in stocks)
             csv_missing.difference_update(fetched)
+
+        if outcome.tool == "triage_watchlist":
+            if outcome.ok:
+                triage_rows = list(outcome.result.get("rows") or [])
+            expand_notes = expand_after_triage(
+                built,
+                index,
+                outcome,
+                holdings,
+                budget=budget,
+                csv_missing=csv_missing,
+                permissions=perms,
+                skip_pdf=ctx.skip_pdf,
+                max_rounds=ctx.max_rounds,
+            )
+            built.notes.extend(expand_notes)
+            run.notes.extend(expand_notes)
 
         if outcome.tool == "run_report_gate":
             _mark_research_artifact(artifacts, report_ok, facts_ready, outcome, trade_date)
@@ -1238,7 +1490,9 @@ def run_agent(
 
 
 def _digest_items(
-    artifacts: dict[str, dict[str, Any]], trade_date: str | None
+    artifacts: dict[str, dict[str, Any]],
+    trade_date: str | None,
+    triage_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for stock_id, payload in artifacts.items():
@@ -1253,6 +1507,21 @@ def _digest_items(
                 "markdown": markdown,
                 "trade_date": payload.get("trade_date") or trade_date,
                 "position_markdown": payload.get("position_markdown"),
+            }
+        )
+    for row in triage_rows or []:
+        stock_id = str(row.get("stock_id") or "")
+        if not stock_id or stock_id in artifacts:
+            continue
+        if not notify_may_include_triage_line(picked=bool(row.get("picked"))):
+            continue
+        items.append(
+            {
+                "stock_id": stock_id,
+                "stock_name": row.get("stock_name") or None,
+                "markdown": f"（今日分流未深挖，只有籌碼 facts）{row.get('summary') or ''}",
+                "trade_date": trade_date,
+                "position_markdown": None,
             }
         )
     return items
@@ -1317,6 +1586,18 @@ def format_run(run: AgentRun) -> str:
         lines.append("Probes:")
         for index, step in enumerate(run.probes, start=1):
             lines.append(_format_step_line(index, step))
+
+    triage = next(
+        (
+            step
+            for step in [*run.probes, *run.steps]
+            if step.tool == "triage_watchlist" and step.ok and not step.skipped
+        ),
+        None,
+    )
+    if triage is not None:
+        lines.append("")
+        lines.extend(format_triage(triage.result))
 
     if not run.dry_run:
         lines.append("")
@@ -1496,6 +1777,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-calls", type=int, default=DEFAULT_MAX_TOOL_CALLS)
     parser.add_argument("--max-elapsed", type=float, default=DEFAULT_MAX_ELAPSED_SEC)
     parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_GATE_ROUNDS)
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=DEFAULT_TOP_K,
+        help="分流後最多深挖幾檔（預設 3，上限 8；預算不夠會再縮）",
+    )
     parser.add_argument("--skip-pdf", action="store_true", default=True)
     parser.add_argument("--tavily", action="store_true", help="允許 answer_market_chat 使用 Tavily")
     parser.add_argument(
@@ -1592,6 +1879,7 @@ def main(argv: list[str] | None = None) -> int:
         run_id=run_id,
         audit_enabled=(not args.no_audit) and (bool(args.audit_dir) or not args.dry_run),
         audit_path=audit_path,
+        triage_top_k=max(0, args.top_k),
     )
     run = run_agent(intent, ctx, plan=external_plan)
     if args.json:

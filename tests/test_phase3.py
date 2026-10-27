@@ -61,6 +61,21 @@ def _ok(tool: str, **extra):
     return payload
 
 
+def _triage_all(args: dict):
+    stocks = [str(s) for s in args.get("stocks") or []]
+    return _ok(
+        "triage_watchlist",
+        trade_date=args.get("trade_date"),
+        rows=[
+            {"stock_id": sid, "picked": True, "score": 3, "summary": f"{sid} fixture"}
+            for sid in stocks
+        ],
+        picks=stocks,
+        skipped=[],
+        missing=[],
+    )
+
+
 def _holdings_ctx(**overrides) -> AgentContext:
     data = dict(
         intent="幫我處理今天持股",
@@ -220,6 +235,8 @@ class ExecutePhase3Tests(unittest.TestCase):
             calls.append((tool, dict(args)))
             if tool == "fetch_chips":
                 return _ok("fetch_chips", csv_paths=["/tmp/tw_stock_2409.csv"])
+            if tool == "triage_watchlist":
+                return _triage_all(args)
             if tool == "run_report_gate":
                 payload = _ok(
                     "run_report_gate",
@@ -276,7 +293,13 @@ class ExecutePhase3Tests(unittest.TestCase):
         tools = [step.tool for step in run.steps if not step.skipped]
         self.assertEqual(
             tools,
-            ["fetch_chips", "run_report_gate", "run_position_gate", "draft_digest"],
+            [
+                "fetch_chips",
+                "triage_watchlist",
+                "run_report_gate",
+                "run_position_gate",
+                "draft_digest",
+            ],
         )
         self.assertNotIn("send_digest", tools)
         self.assertEqual(run.digest_status, DIGEST_PENDING)
@@ -324,6 +347,8 @@ class ExecutePhase3Tests(unittest.TestCase):
 
         def fake(tool: str, args: dict):
             calls.append((tool, dict(args)))
+            if tool == "triage_watchlist":
+                return _triage_all(args)
             if tool == "run_report_gate":
                 return {
                     "ok": False,
@@ -352,6 +377,8 @@ class ExecutePhase3Tests(unittest.TestCase):
 
         def fake(tool: str, args: dict):
             calls.append((tool, dict(args)))
+            if tool == "triage_watchlist":
+                return _triage_all(args)
             if tool == "run_report_gate":
                 return {"ok": False, "exit_code": EXIT_FAILED, "error": "gate", "stock_id": "2409"}
             if tool == "run_position_gate":

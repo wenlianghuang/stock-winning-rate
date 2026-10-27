@@ -568,6 +568,10 @@ def _load_yahoo_board(
     payload = _load_facts_json(path)
     if not isinstance(payload, dict):
         return None, None, None
+    from yahoo_board import yahoo_chip_inputs_ready
+
+    if str(payload.get("source") or "") == "yahoo" and not yahoo_chip_inputs_ready(payload):
+        return None, None, None
     fact_date = str(payload.get("trade_date") or "") or None
     if trade_date and fact_date and fact_date != trade_date:
         return None, None, None
@@ -1544,6 +1548,54 @@ def create_app() -> FastAPI:
         )
         brief["warnings"] = board.get("warnings") or []
         return brief
+
+    @app.get("/triage")
+    def triage(
+        ids: str,
+        held: str | None = None,
+        date: str | None = None,
+        top_k: int = 3,
+        fetch: bool = False,
+    ) -> dict[str, Any]:
+        """Rank stocks by what changed today; no agy. ``fetch=true`` fills missing CSVs first."""
+        if date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise HTTPException(status_code=400, detail="date 格式須為 YYYY-MM-DD")
+        stock_ids = list(dict.fromkeys(part.strip() for part in ids.split(",") if part.strip()))
+        held_ids = [part.strip() for part in (held or "").split(",") if part.strip()]
+        if not stock_ids:
+            raise HTTPException(status_code=400, detail="請指定代號")
+        if any(not re.match(r"^\d{4,6}$", sid) for sid in stock_ids + held_ids):
+            raise HTTPException(status_code=400, detail="ids 須為 4～6 位數台股代號")
+        if len(stock_ids) > 60:
+            raise HTTPException(status_code=400, detail="一次最多 60 檔")
+
+        from agent.tools.triage import triage_watchlist
+
+        fetch_note: str | None = None
+        if fetch:
+            _ensure_import_paths()
+            from stock_paths import find_stock_csv
+
+            missing = [sid for sid in stock_ids if find_stock_csv(sid, date, root=ROOT) is None]
+            if missing:
+                from agent.tools.chips import FetchChipsInput, fetch_chips
+
+                fetched = fetch_chips(FetchChipsInput(stocks=missing, trade_date=date))
+                if not fetched.ok:
+                    fetch_note = f"補抓失敗：{fetched.error or 'fetch_chips failed'}"
+
+        result = triage_watchlist(
+            stocks=stock_ids,
+            held=held_ids,
+            trade_date=date,
+            top_k=max(0, top_k),
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.error or "分流失敗")
+        payload = asdict(result)
+        if fetch_note:
+            payload["notes"] = [fetch_note, *payload.get("notes", [])]
+        return payload
 
     @app.get("/us-indices")
     def us_indices() -> dict[str, Any]:

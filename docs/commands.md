@@ -108,7 +108,7 @@ uv run --extra ui --extra stock python main.py portfolio-gate -- --mode theme --
 - `GET /concept-groups`：主題與成員
 - `GET /concept-board?theme=pcb&date=YYYY-MM-DD`：該主題每一檔的收盤、漲跌、區間報酬、外資、籌碼、相對大盤
 - `ids=8046,3037` 可收成一小群；同時給 `theme` 時取交集
-- `fetch=true` 才向 Yahoo 股市補缺檔（收盤、漲跌、外資、主力），寫進 `tw_stock_{代號}.yahoo_board.json`，不打 FinMind、不覆蓋 facts.json。預設只讀磁碟上已有的 facts 或這份 sidecar
+- `fetch=true` 才向 Yahoo 股市補缺檔（收盤、漲跌、外資、主力、融資融券餘額、五日外資累計），寫進 `tw_stock_{代號}.yahoo_board.json`，不打 FinMind、不覆蓋 facts.json。籌碼狀態用這五日的融資融券變化和外資累計計分。舊的 sidecar 沒有這兩欄時，下次開表會重抓。預設只讀磁碟上已有的 facts 或這份 sidecar
 - `GET /concept-board/brief?ids=3324,3017&date=YYYY-MM-DD&held=3017`：勾選的股票平等比較。近五個交易日的報酬，對上外資、投信、自營是否同向。有持股才寫換檔或續抱；沒有持股只寫是否值得觀察入場。不寫張數，不呼叫模型
 
 ---
@@ -171,11 +171,17 @@ ADK Web：`http://127.0.0.1:8002`。步驟見 [`a2a-adk.md`](./a2a-adk.md)。
 現場 10–15 分鐘不當主線；主線是 MCP 2330 → gate 產物 → 盤前 brief，見 [`agent-roadmap.md`](./agent-roadmap.md) §8。
 
 ```bash
-# 處理 holdings.json 裡有均價／張數的標的（fetch → report-gate → position-gate → digest 草稿）
+# 處理 holdings.json 裡有均價／張數的標的
+# fetch → triage_watchlist 分流 → 只對選中的跑 report-gate／position-gate → digest 草稿
+# 略過的持股在草稿裡各留一行 facts；--top-k 調整最多深挖幾檔（預設 3，上限 8）
 uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持股"
 
-# 只列 plan，不跑 fetch／agy
+# 只列 plan，不跑 fetch／agy（分流唯讀，dry-run 也會跑，並列出第二段要深挖的 gate）
 uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "幫我處理今天持股"
+
+# 只分流、不跑 agy：持股、句中代號，或「觀察名單」讀 watchlist.txt
+uv run --extra stock --extra ui python main.py agent --date 2026-10-22 -- "今天哪幾檔要注意"
+uv run --extra stock --extra ui python main.py agent --date 2026-10-22 -- "幫我分流 2330 2454 3037"
 
 # 無持倉：只 research，並說明為什麼沒跑部位
 uv run --extra stock --extra ui python main.py agent --dry-run --date 2026-08-18 -- "2330 要不要動"

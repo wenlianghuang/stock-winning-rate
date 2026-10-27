@@ -65,6 +65,31 @@ def _ok(tool: str, **extra):
     return payload
 
 
+def _triage(args: dict, picks: list[str] | None = None):
+    stocks = [str(s) for s in args.get("stocks") or []]
+    chosen = list(stocks if picks is None else picks)
+    rows = [
+        {
+            "stock_id": sid,
+            "stock_name": "",
+            "picked": sid in chosen,
+            "score": 3 if sid in chosen else 0,
+            "summary": f"{sid} fixture",
+        }
+        for sid in stocks
+    ]
+    return _ok(
+        "triage_watchlist",
+        trade_date=args.get("trade_date"),
+        top_k=args.get("top_k"),
+        rows=rows,
+        picks=chosen,
+        skipped=[sid for sid in stocks if sid not in chosen],
+        missing=[],
+        notes=[],
+    )
+
+
 class GoldenIntentFixtureTests(unittest.TestCase):
     def _assert_fixture(self, filename: str) -> None:
         payload = _load_fixture(filename)
@@ -197,6 +222,8 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
             calls.append((tool, dict(args)))
             if tool == "fetch_chips":
                 return _ok("fetch_chips", csv_paths=["/tmp/tw_stock_2409.csv"], trade_date="2026-08-18")
+            if tool == "triage_watchlist":
+                return _triage(args)
             if tool == "run_report_gate":
                 if failed["report"]:
                     failed["report"] = False
@@ -248,7 +275,13 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
         tools = [step.tool for step in run.steps if not step.skipped]
         self.assertEqual(
             tools,
-            ["fetch_chips", "run_report_gate", "run_position_gate", "draft_digest"],
+            [
+                "fetch_chips",
+                "triage_watchlist",
+                "run_report_gate",
+                "run_position_gate",
+                "draft_digest",
+            ],
         )
         self.assertTrue(run.ok)
         self.assertEqual(run.digest_status, DIGEST_PENDING)
@@ -367,6 +400,8 @@ class ExecuteWithFakeDispatchTests(unittest.TestCase):
             calls.append((tool, dict(args)))
             if tool == "fetch_chips":
                 return _ok("fetch_chips", csv_paths=["/tmp/x.csv"])
+            if tool == "triage_watchlist":
+                return _triage(args)
             if tool == "run_report_gate":
                 return {"ok": False, "exit_code": EXIT_FAILED, "error": "gate", "stock_id": "2409"}
             if tool == "run_position_gate":
@@ -412,8 +447,8 @@ class CliTests(unittest.TestCase):
         output = buffer.getvalue()
         self.assertEqual(code, 0)
         self.assertIn("process_holdings", output)
-        self.assertIn("run_report_gate", output)
-        self.assertIn("run_position_gate", output)
+        self.assertIn("triage_watchlist", output)
+        self.assertIn("分流（2026-08-18）", output)
         self.assertIn("draft_digest", output)
         self.assertIn("blocked", output)
         self.assertIn("dry-run", output)

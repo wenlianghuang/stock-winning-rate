@@ -116,8 +116,8 @@ def build_agent_card(*, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> A
             id=SKILL_PROCESS_HOLDINGS,
             name="處理持股",
             description=(
-                "讀 holdings → 缺 CSV 就 fetch → report-gate → 有均價／張數才 position-gate → "
-                "digest 草稿。send_digest 不會自動寄出。"
+                "讀 holdings → 缺 CSV 就 fetch → facts 分流 → 只對今天有變化的持股跑 report-gate → "
+                "有均價／張數才 position-gate → digest 草稿。send_digest 不會自動寄出。"
             ),
             tags=["twse", "holdings", "chips"],
             examples=["幫我處理今天持股"],

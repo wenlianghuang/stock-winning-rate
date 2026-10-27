@@ -1179,6 +1179,39 @@
         "optical_comms"
       ],
       "defensive": false
+    },
+    {
+      "id": "6805",
+      "name": "富世達",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "8996",
+      "name": "高力",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "2486",
+      "name": "一詮",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "thermal",
+      "themes": [
+        "thermal"
+      ],
+      "defensive": false
     }
   ]
 }

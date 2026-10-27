@@ -12,6 +12,9 @@ Phase 3 adds role allowlists, human-gate permissions, Research facts before
 Position (or explicit skip_research), and Notify-only-passed-artifacts.
 The Research → Validator loop stays inside report-gate; policy only decides
 who may call which tool and when a handoff is legal.
+
+Triage: process_holdings runs triage_watchlist before any gate; only its picks
+get report/position gates, trimmed to what the remaining budget can afford.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ ALLOWED_TOOLS = frozenset(
         "get_holdings",
         "fetch_chips",
         "build_chip_facts",
+        "triage_watchlist",
         "run_report_gate",
         "run_position_gate",
         "run_market_daily",
@@ -38,7 +42,9 @@ ALLOWED_TOOLS = frozenset(
     }
 )
 
-DATA_TOOLS = frozenset({"get_last_trading_date", "fetch_chips", "build_chip_facts"})
+DATA_TOOLS = frozenset(
+    {"get_last_trading_date", "fetch_chips", "build_chip_facts", "triage_watchlist"}
+)
 RESEARCH_TOOLS = frozenset({"run_report_gate", "run_market_daily", "answer_market_chat", "answer_report_chat"})
 POSITION_TOOLS = frozenset({"run_position_gate"})
 GATE_TOOLS = frozenset({"run_report_gate", "run_position_gate", "run_market_daily"})
@@ -71,6 +77,7 @@ TOOL_ACTOR: dict[str, str] = {
     "get_holdings": ROLE_DATA,
     "fetch_chips": ROLE_DATA,
     "build_chip_facts": ROLE_DATA,
+    "triage_watchlist": ROLE_DATA,
     "run_report_gate": ROLE_RESEARCH,
     "run_market_daily": ROLE_RESEARCH,
     "answer_market_chat": ROLE_CHAT,
@@ -94,6 +101,7 @@ ROLE_ALLOWLIST: dict[str, frozenset[str]] = {
             "get_last_trading_date",
             "get_holdings",
             "run_market_daily",
+            "triage_watchlist",
         }
     ),
 }
@@ -114,6 +122,16 @@ FORBIDDEN_BROKER_TOOLS = frozenset(
 INTENT_PROCESS_HOLDINGS = "process_holdings"
 INTENT_STOCK_DECISION = "stock_decision"
 INTENT_MARKET_OUTLOOK = "market_outlook"
+INTENT_WATCHLIST_SCAN = "watchlist_scan"
+
+KNOWN_INTENTS = frozenset(
+    {
+        INTENT_PROCESS_HOLDINGS,
+        INTENT_STOCK_DECISION,
+        INTENT_MARKET_OUTLOOK,
+        INTENT_WATCHLIST_SCAN,
+    }
+)
 
 DIGEST_PENDING = "pending_approval"
 DIGEST_SKIPPED = "skipped"
@@ -123,6 +141,11 @@ DIGEST_BLOCKED = "blocked"
 DEFAULT_MAX_TOOL_CALLS = 32
 DEFAULT_MAX_ELAPSED_SEC = 1800.0
 DEFAULT_MAX_GATE_ROUNDS = 8
+
+# Measured from gate logs: one agy round ~40 s, a stock usually needs ~2 rounds.
+GATE_EST_SEC = 80.0
+# Calls kept back after triage for draft_digest and one missing-CSV retry.
+TRIAGE_RESERVED_CALLS = 2
 
 
 @dataclass
@@ -138,6 +161,8 @@ class Permissions:
 def role_for_intent(intent_kind: str) -> str:
     if intent_kind == INTENT_MARKET_OUTLOOK:
         return ROLE_CHAT
+    if intent_kind == INTENT_WATCHLIST_SCAN:
+        return ROLE_DATA
     return ROLE_ORCHESTRATOR
 
 
@@ -275,9 +300,42 @@ def allow_position_handoff(
     return True, reason
 
 
+def fit_picks_to_budget(
+    picks: list[str],
+    holdings: dict[str, Any],
+    *,
+    remaining_calls: int,
+    remaining_sec: float,
+    gate_est_sec: float = GATE_EST_SEC,
+) -> tuple[list[str], list[str]]:
+    """Keep triage picks, in order, while their gates fit the remaining budget.
+
+    A held stock costs two gates (report + position); others cost one.
+    """
+    calls_left = remaining_calls - TRIAGE_RESERVED_CALLS
+    sec_left = remaining_sec
+    kept: list[str] = []
+    dropped: list[str] = []
+    for stock_id in picks:
+        gates = 2 if allow_position(stock_id, holdings)[0] else 1
+        cost_sec = gates * gate_est_sec
+        if dropped or gates > calls_left or cost_sec > sec_left:
+            dropped.append(stock_id)
+            continue
+        kept.append(stock_id)
+        calls_left -= gates
+        sec_left -= cost_sec
+    return kept, dropped
+
+
 def notify_may_include(*, report_passed: bool) -> bool:
     """Notify only receives artifacts that already passed a gate."""
     return report_passed
+
+
+def notify_may_include_triage_line(*, picked: bool) -> bool:
+    """Triage-skipped stocks get a facts line; picked ones reach Notify only via a passed gate."""
+    return not picked
 
 
 def broker_tools_exposed() -> frozenset[str]:
@@ -290,13 +348,9 @@ def validate_plan_schema(data: dict[str, Any]) -> list[str]:
     if not isinstance(data, dict):
         return ["plan 必須是 JSON object"]
     kind = data.get("intent_kind")
-    if kind not in {
-        INTENT_PROCESS_HOLDINGS,
-        INTENT_STOCK_DECISION,
-        INTENT_MARKET_OUTLOOK,
-    }:
+    if kind not in KNOWN_INTENTS:
         errors.append(
-            "intent_kind 必須是 process_holdings / stock_decision / market_outlook"
+            "intent_kind 必須是 process_holdings / stock_decision / market_outlook / watchlist_scan"
         )
     steps = data.get("steps")
     if not isinstance(steps, list):

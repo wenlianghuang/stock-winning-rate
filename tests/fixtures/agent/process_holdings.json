@@ -12,11 +12,10 @@
   "expect_intent_kind": "process_holdings",
   "expect_tools": [
     "fetch_chips",
-    "run_report_gate",
-    "run_position_gate",
+    "triage_watchlist",
     "draft_digest"
   ],
-  "forbid_tools": ["send_digest"],
+  "forbid_tools": ["send_digest", "run_report_gate", "run_position_gate"],
   "expect_digest_status": "pending_approval",
-  "expect_notes_any": ["待核准"]
+  "expect_notes_any": ["待核准", "triage_watchlist 之後"]
 }

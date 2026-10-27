@@ -30,12 +30,15 @@ SERVER_INSTRUCTIONS = """\
 不要對無持股標的呼叫 run_position_gate。send_digest 預設 blocked，且本 repo 不寄信。
 
 缺 CSV 先 fetch；gate 失敗看 exit_code（20=缺 CSV，10=缺 agy，1=未通過）。
+
+多檔時先 triage_watchlist（唯讀、不跑 agy），只對 picks 跑 run_report_gate。
 """
 
 TOOL_NAMES = (
     "get_last_trading_date",
     "fetch_chips",
     "build_chip_facts",
+    "triage_watchlist",
     "run_report_gate",
     "get_holdings",
     "run_position_gate",
@@ -158,6 +161,37 @@ def _register_tools(mcp: FastMCP) -> None:
                     stock_id=_opt_str(stock_id),
                     trade_date=_opt_str(trade_date),
                     csv_path=_opt_str(csv_path),
+                )
+            )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, title="Triage watchlist by facts"),
+        description=(
+            "多檔分流：用既有 CSV 算籌碼 facts，和更早一份資料比較，列出今天狀態有變化的標的"
+            "（型態翻轉、突破／跌破 20 日、新背離、外資連買賣中斷、持有中偏空等）。"
+            "回傳 rows（每檔分數與理由）、picks（建議跑 run_report_gate 的代號，最多 top_k）、"
+            "skipped、missing。分數代表「需要看」，不是漲跌預測。唯讀：不抓資料、不寫檔、不跑 agy。"
+            "stocks 省略時依 source：holdings 讀持股、watchlist 讀 watchlist.txt。"
+            "缺 CSV 的檔會列在 missing；需要的話先 fetch_chips 再分流。"
+        ),
+    )
+    def triage_watchlist(
+        stocks: list[str] | str | None = None,
+        trade_date: str | None = None,
+        source: str = "holdings",
+        top_k: int = 3,
+        held: list[str] | str | None = None,
+    ) -> dict[str, Any]:
+        from agent.tools.triage import triage_watchlist as impl
+
+        with _stderr_stdout():
+            return _payload(
+                impl(
+                    stocks=_normalize_stocks(stocks),
+                    trade_date=_opt_str(trade_date),
+                    source=source,
+                    top_k=top_k,
+                    held=_normalize_stocks(held),
                 )
             )
 
