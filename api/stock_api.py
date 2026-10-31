@@ -50,7 +50,9 @@ PORTFOLIO_MIN_AMOUNT = 50_000
 MARKET_WEEKLY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-weekly"
 MARKET_WEEKLY_SCRIPT = MARKET_WEEKLY_SKILL_DIR / "market_weekly_gate.py"
 MARKET_DAILY_SKILL_DIR = ROOT / ".agents" / "skills" / "market-daily"
+MARKET_CLOSE_SKILL_DIR = ROOT / ".agents" / "skills" / "market-close"
 MARKET_ROOT = ROOT / "reports" / "market"
+CONCEPT_NEWS_SKILL_DIR = ROOT / ".agents" / "skills" / "concept-news"
 WEB_ROOT = ROOT / "web"
 CHART_LOOKBACK_DAYS = 60
 
@@ -120,6 +122,12 @@ _market_weekly_jobs_lock = threading.Lock()
 _market_daily_jobs: dict[str, "MarketDailyJob"] = {}
 _market_daily_jobs_lock = threading.Lock()
 
+_market_close_jobs: dict[str, "MarketCloseJob"] = {}
+_market_close_jobs_lock = threading.Lock()
+
+_concept_news_jobs: dict[str, "ConceptNewsJob"] = {}
+_concept_news_jobs_lock = threading.Lock()
+
 
 @dataclass
 class MarketWeeklyJob:
@@ -174,6 +182,65 @@ class MarketDailyJob:
 
 
 def _update_market_daily_job(job: MarketDailyJob, **changes: Any) -> None:
+    for key, value in changes.items():
+        setattr(job, key, value)
+    job.updated_at = _now_iso()
+
+
+@dataclass
+class MarketCloseJob:
+    id: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    as_of: str | None = None
+    trade_date: str | None = None
+    error: str | None = None
+    skip_news: bool = False
+    force: bool = False
+    facts: dict[str, Any] | None = None
+    summary: dict[str, Any] | None = None
+    markdown: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        return data
+
+
+def _update_market_close_job(job: MarketCloseJob, **changes: Any) -> None:
+    for key, value in changes.items():
+        setattr(job, key, value)
+    job.updated_at = _now_iso()
+
+
+@dataclass
+class ConceptNewsJob:
+    id: str
+    theme_id: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    label: str | None = None
+    as_of: str | None = None
+    error: str | None = None
+    force: bool = False
+    skip_summary: bool = False
+    searched: bool = False
+    reused: bool = False
+    summary: str | None = None
+    events: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["status"] = self.status.value
+        if self.status != JobStatus.DONE:
+            data.pop("summary", None)
+            data.pop("events", None)
+        return data
+
+
+def _update_concept_news_job(job: ConceptNewsJob, **changes: Any) -> None:
     for key, value in changes.items():
         setattr(job, key, value)
     job.updated_at = _now_iso()
@@ -287,6 +354,18 @@ class CreateMarketWeeklyJobRequest(BaseModel):
     max_rounds: int = Field(default=6, ge=1, le=12)
 
 
+class CreateMarketCloseJobRequest(BaseModel):
+    as_of: str | None = Field(default=None, description="覆寫當下時間 ISO 或 YYYY-MM-DD")
+    trade_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="強制收盤 trade_date（略過 17:30 cutover）",
+    )
+    skip_news: bool = False
+    force: bool = False
+    max_rounds: int = Field(default=4, ge=1, le=8)
+
+
 class CreateMarketDailyJobRequest(BaseModel):
     as_of: str | None = Field(
         default=None,
@@ -301,6 +380,20 @@ class CreateMarketDailyJobRequest(BaseModel):
     skip_us: bool = False
     force: bool = False
     max_rounds: int = Field(default=6, ge=1, le=12)
+
+
+class CreateConceptNewsJobRequest(BaseModel):
+    theme: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    force: bool = False
+    skip_summary: bool = False
+    max_rounds: int = Field(default=2, ge=1, le=4)
+
+
+class ConceptNewsAskRequest(BaseModel):
+    theme: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    message: str = Field(min_length=1, max_length=2000)
 
 
 class MarketDailyChatHistoryItem(BaseModel):
@@ -1337,6 +1430,116 @@ def _run_market_daily_pipeline(job_id: str, max_rounds: int) -> None:
             _update_market_daily_job(job, status=JobStatus.FAILED, error=str(exc))
 
 
+def _load_market_close_artifacts(trade_date: str) -> dict[str, Any]:
+    out_dir = MARKET_ROOT / trade_date
+    facts_file = out_dir / "tw_market_close.facts.json"
+    summary_file = out_dir / "tw_market_close.summary.json"
+    md_file = out_dir / "tw_market_close.md"
+    return {
+        "facts": json.loads(facts_file.read_text(encoding="utf-8")) if facts_file.exists() else None,
+        "summary": json.loads(summary_file.read_text(encoding="utf-8")) if summary_file.exists() else None,
+        "markdown": md_file.read_text(encoding="utf-8") if md_file.exists() else None,
+    }
+
+
+def _run_market_close_pipeline(job_id: str, max_rounds: int) -> None:
+    skill = str(MARKET_CLOSE_SKILL_DIR)
+    if skill not in sys.path:
+        sys.path.insert(0, skill)
+    from market_close_gate import resolve_window_or_fail, run_gate
+
+    with _market_close_jobs_lock:
+        job = _market_close_jobs.get(job_id)
+    if job is None:
+        return
+    try:
+        with _market_close_jobs_lock:
+            _update_market_close_job(job, status=JobStatus.GATING, error=None)
+        window = resolve_window_or_fail(as_of=job.as_of, trade_date=job.trade_date)
+        code = run_gate(
+            window=window,
+            max_rounds=max(1, max_rounds),
+            skip_agy=False,
+            skip_news=job.skip_news,
+            validate_only=False,
+        )
+        artifacts = _load_market_close_artifacts(window.trade_date)
+        if not artifacts.get("markdown"):
+            raise RuntimeError(
+                "market-close 未產出報告" if code == 0 else f"market-close exit {code}"
+            )
+        with _market_close_jobs_lock:
+            _update_market_close_job(
+                job,
+                status=JobStatus.DONE,
+                trade_date=window.trade_date,
+                facts=artifacts.get("facts"),
+                summary=artifacts.get("summary"),
+                markdown=artifacts.get("markdown"),
+                error=None,
+            )
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        with _market_close_jobs_lock:
+            _update_market_close_job(job, status=JobStatus.FAILED, error=f"market-close exit {code}")
+    except Exception as exc:
+        with _market_close_jobs_lock:
+            _update_market_close_job(job, status=JobStatus.FAILED, error=str(exc))
+
+
+def _concept_news_modules():
+    skill = str(CONCEPT_NEWS_SKILL_DIR)
+    if skill not in sys.path:
+        sys.path.insert(0, skill)
+
+
+def _run_concept_news_job(
+    job_id: str,
+    *,
+    as_of: str | None,
+    force: bool,
+    skip_summary: bool,
+    max_rounds: int,
+) -> None:
+    with _concept_news_jobs_lock:
+        job = _concept_news_jobs.get(job_id)
+        if job is None:
+            return
+        _update_concept_news_job(job, status=JobStatus.FETCHING)
+    try:
+        _concept_news_modules()
+        from run_theme import run_theme
+
+        result = run_theme(
+            job.theme_id,
+            as_of=as_of,
+            force=force,
+            skip_summary=skip_summary,
+            max_rounds=max_rounds,
+        )
+        with _concept_news_jobs_lock:
+            current = _concept_news_jobs.get(job_id)
+            if current is None:
+                return
+            _update_concept_news_job(
+                current,
+                status=JobStatus.DONE,
+                label=result.get("label"),
+                as_of=result.get("as_of"),
+                searched=bool(result.get("searched")),
+                reused=bool(result.get("reused")),
+                summary=result.get("summary"),
+                events=result.get("events"),
+                error=None,
+            )
+    except Exception as exc:
+        with _concept_news_jobs_lock:
+            current = _concept_news_jobs.get(job_id)
+            if current is None:
+                return
+            _update_concept_news_job(current, status=JobStatus.FAILED, error=str(exc))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Stock Winning Rate API", version="0.1.0")
 
@@ -2033,6 +2236,122 @@ def create_app() -> FastAPI:
 
         return {"job": job.to_dict()}
 
+    def _close_window(as_of: str | None, trade_date: str | None):
+        skill = str(MARKET_CLOSE_SKILL_DIR)
+        if skill not in sys.path:
+            sys.path.insert(0, skill)
+        from market_close_gate import resolve_window_or_fail
+
+        return resolve_window_or_fail(as_of=as_of, trade_date=trade_date)
+
+    @app.get("/market-close/current")
+    def current_market_close(
+        as_of: str | None = None,
+        trade_date: str | None = None,
+    ) -> dict[str, Any]:
+        if trade_date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", trade_date):
+            raise HTTPException(status_code=400, detail="trade_date 格式須為 YYYY-MM-DD")
+        try:
+            window = _close_window(as_of, trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        artifacts = _load_market_close_artifacts(window.trade_date)
+        ready = bool(artifacts["markdown"] and artifacts["facts"] and artifacts["summary"])
+        return {
+            "window": window.as_dict(),
+            "ready": ready,
+            "shared": True,
+            "brief": {
+                "trade_date": window.trade_date,
+                "facts": artifacts["facts"],
+                "summary": artifacts["summary"],
+                "markdown": artifacts["markdown"],
+                "has_report": bool(artifacts["markdown"]),
+            },
+        }
+
+    @app.get("/market-close/resolve")
+    def resolve_market_close(
+        as_of: str | None = None,
+        trade_date: str | None = None,
+    ) -> dict[str, Any]:
+        if trade_date is not None and not re.match(r"^\d{4}-\d{2}-\d{2}$", trade_date):
+            raise HTTPException(status_code=400, detail="trade_date 格式須為 YYYY-MM-DD")
+        try:
+            window = _close_window(as_of, trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"window": window.as_dict()}
+
+    @app.get("/market-close")
+    def list_market_close() -> dict[str, Any]:
+        items: list[dict[str, Any]] = []
+        if MARKET_ROOT.exists():
+            for day_dir in sorted(MARKET_ROOT.iterdir(), reverse=True):
+                if not day_dir.is_dir():
+                    continue
+                artifacts = _load_market_close_artifacts(day_dir.name)
+                if artifacts["facts"] is None and artifacts["summary"] is None:
+                    continue
+                items.append(
+                    {
+                        "trade_date": day_dir.name,
+                        "summary": artifacts["summary"],
+                        "facts": artifacts["facts"],
+                        "markdown": artifacts["markdown"],
+                        "has_report": bool(artifacts["markdown"]),
+                        "ready": bool(
+                            artifacts["markdown"] and artifacts["facts"] and artifacts["summary"]
+                        ),
+                        "shared": True,
+                    }
+                )
+                if len(items) >= 30:
+                    break
+        return {"items": items, "shared": True}
+
+    @app.get("/market-close/jobs/{job_id}")
+    def get_market_close_job(job_id: str) -> dict[str, Any]:
+        with _market_close_jobs_lock:
+            job = _market_close_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到 market-close job")
+        return {"job": job.to_dict()}
+
+    @app.post("/market-close/jobs")
+    def create_market_close_job(body: CreateMarketCloseJobRequest) -> dict[str, Any]:
+        try:
+            window = _close_window(body.as_of, body.trade_date)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        artifacts = _load_market_close_artifacts(window.trade_date)
+        reuse = (
+            not body.force
+            and bool(artifacts["markdown"] and artifacts["facts"] and artifacts["summary"])
+        )
+        job_id = uuid.uuid4().hex
+        job = MarketCloseJob(
+            id=job_id,
+            as_of=body.as_of,
+            trade_date=window.trade_date,
+            skip_news=body.skip_news,
+            force=body.force,
+            status=JobStatus.DONE if reuse else JobStatus.GATING,
+            facts=artifacts["facts"] if reuse else None,
+            summary=artifacts["summary"] if reuse else None,
+            markdown=artifacts["markdown"] if reuse else None,
+        )
+        with _market_close_jobs_lock:
+            _market_close_jobs[job_id] = job
+        if not reuse:
+            thread = threading.Thread(
+                target=_run_market_close_pipeline,
+                args=(job_id, body.max_rounds),
+                daemon=True,
+            )
+            thread.start()
+        return {"job": job.to_dict()}
+
     @app.post("/market-daily/chat/stream")
     async def market_daily_chat_stream(
         body: MarketDailyChatRequest,
@@ -2256,6 +2575,110 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"job": job}
+
+    @app.get("/concept-news/themes")
+    def list_concept_news_themes() -> dict[str, Any]:
+        _concept_news_modules()
+        from answer_events import list_themes
+
+        return {"themes": list_themes()}
+
+    @app.get("/concept-news/reports")
+    def list_concept_news_reports(theme: str) -> dict[str, Any]:
+        _concept_news_modules()
+        from answer_events import list_written_reports
+
+        try:
+            items = list_written_reports(theme)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        from run_theme import news_report_date
+
+        return {"theme": theme, "items": items, "news_as_of": news_report_date()}
+
+    @app.get("/concept-news/reports/{theme_id}/{day}")
+    def get_concept_news_report(theme_id: str, day: str) -> dict[str, Any]:
+        _concept_news_modules()
+        from answer_events import load_written_report
+
+        try:
+            report = load_written_report(theme_id, day)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if report is None:
+            raise HTTPException(status_code=404, detail="還沒有這份題材新聞")
+        return {"report": report}
+
+    @app.post("/concept-news/jobs")
+    def create_concept_news_job(body: CreateConceptNewsJobRequest) -> dict[str, Any]:
+        _concept_news_modules()
+        from theme_pack import build_theme_pack
+
+        from run_theme import ensure_news_date_ready, news_report_date
+
+        try:
+            pack = build_theme_pack(body.theme)
+            day = ensure_news_date_ready(body.date) if body.date else news_report_date()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        job_id = uuid.uuid4().hex
+        job = ConceptNewsJob(
+            id=job_id,
+            theme_id=pack.theme_id,
+            label=pack.label,
+            as_of=day,
+            force=body.force,
+            skip_summary=body.skip_summary,
+            status=JobStatus.QUEUED,
+        )
+        with _concept_news_jobs_lock:
+            _concept_news_jobs[job_id] = job
+
+        thread = threading.Thread(
+            target=_run_concept_news_job,
+            kwargs={
+                "job_id": job_id,
+                "as_of": day,
+                "force": body.force,
+                "skip_summary": body.skip_summary,
+                "max_rounds": body.max_rounds,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return {"job": job.to_dict()}
+
+    @app.get("/concept-news/jobs/{job_id}")
+    def get_concept_news_job(job_id: str) -> dict[str, Any]:
+        with _concept_news_jobs_lock:
+            job = _concept_news_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到題材新聞 job")
+        return {"job": job.to_dict()}
+
+    @app.post("/concept-news/ask")
+    def ask_concept_news(body: ConceptNewsAskRequest) -> dict[str, Any]:
+        _concept_news_modules()
+        from answer_events import answer_from_events, load_written_report
+
+        try:
+            report = load_written_report(body.theme, body.date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if report is None or not report.get("events"):
+            raise HTTPException(status_code=404, detail="還沒有這份事件表")
+        try:
+            result = answer_from_events(body.message, report["events"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "theme_id": body.theme,
+            "date": body.date,
+            "answer": result["answer"],
+            "found": result["found"],
+            "event_ids": result["event_ids"],
+        }
 
     @app.post("/jobs")
     def create_job(body: CreateJobRequest) -> dict[str, Any]:

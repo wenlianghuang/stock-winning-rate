@@ -58,6 +58,7 @@ uv run --extra stock --extra ui python main.py schedule --once --dry-run
 uv run --extra stock --extra ui python main.py schedule --once
 ```
 
+```bash
 # 週報（週五 17:30 cutover）
 uv run --extra ui --extra stock python main.py market-weekly
 uv run --extra ui --extra stock python main.py market-weekly -- --week-end 2026-07-31
@@ -66,6 +67,12 @@ uv run --extra ui --extra stock python main.py market-weekly -- --resolve-only
 
 # 日報 grounded chat（讀既有 facts，不重跑 gate）
 uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎麼做？" --dry-run --json
+
+# 收盤日報（交易日 17:30 起切到當日；大盤、七檔權值法人、當天新聞）
+uv run --extra ui --extra stock python main.py market-close
+uv run --extra ui --extra stock python main.py market-close -- --resolve-only
+uv run --extra ui --extra stock python main.py market-close -- --date 2026-10-29 --skip-agy
+# crontab：30 17 * * 1-5  … scripts/run_market_close.sh
 ```
 
 ---
@@ -124,6 +131,21 @@ uv run --extra tech python main.py tech-news -- --skip-summary
 uv run --extra tech python main.py tech-news -- --validate-only
 uv run --extra tech python main.py tech-news -- --hours 72
 ```
+
+---
+
+## 概念題材新聞
+
+產物在 `reports/concept-news/{theme}/`。已有該日事件表就沿用，不重新蒐集。`--force` 才重跑蒐集與報告。報告開頭是看法，寫判斷和結論，不重抄張數；只以報告日當天、台北時間 13:30 以後的稿為依據。收盤後只列事實，不寫解釋。前一日最多在看法裡用一句話寫違逆或順從。當天的新聞報告要到 18:00 以後才能產生，籌碼與其他報告仍是 21:30。第一版不寄信、不排程。
+
+```bash
+uv run --extra stock python main.py concept-news -- --theme panel
+uv run --extra stock python main.py concept-news -- --theme panel --date 2026-10-28 --force
+uv run --extra stock python main.py concept-news -- --theme panel --skip-summary
+uv run --extra stock python main.py concept-news -- --theme panel --validate-only
+```
+
+網站只讀已寫好的 summary 與事件表。API：`GET /concept-news/themes`、`GET /concept-news/reports?theme=panel`、`GET /concept-news/reports/{theme}/{date}`、`POST /concept-news/jobs`、`GET /concept-news/jobs/{id}`、`POST /concept-news/ask`。提問只根據該日事件表。
 
 ---
 

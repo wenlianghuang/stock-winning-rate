@@ -35,12 +35,20 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
         ROOT / ".agents" / "skills" / "us-tech-news" / "process_report.py",
         "tech",
     ),
+    "concept-news": (
+        ROOT / ".agents" / "skills" / "concept-news" / "run_theme.py",
+        "stock",
+    ),
     "market-weekly": (
         ROOT / ".agents" / "skills" / "market-weekly" / "market_weekly_gate.py",
         "ui,stock",
     ),
     "market-daily": (
         ROOT / ".agents" / "skills" / "market-daily" / "market_daily_gate.py",
+        "ui,stock",
+    ),
+    "market-close": (
+        ROOT / ".agents" / "skills" / "market-close" / "market_close_gate.py",
         "ui,stock",
     ),
     "market-daily-chat": (
@@ -60,6 +68,7 @@ INPROC_COMMANDS: dict[str, tuple[str, str]] = {
     "position-gate": ("position-gate", "position_gate"),
     "market-daily": ("market-daily", "market_daily_gate"),
     "market-daily-chat": ("market-daily", "market_day_chat"),
+    "market-close": ("market-close", "market_close_gate"),
 }
 
 
@@ -118,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {'agent':<16} agent/orchestrator.py (extra: stock,ui)")
         print(f"  {'schedule':<16} agent/schedule.py (extra: stock,ui)  05:30 共用盤前 brief")
         print("\nExample: uv run --extra stock python main.py stock-report --stocks 2330")
+        print("         uv run --extra stock python main.py concept-news -- --theme panel")
         print("         uv run --extra server --extra ui --extra stock python main.py api")
         print("         uv run --extra mcp --extra stock --extra ui python main.py mcp")
         print("         uv run --extra a2a --extra stock --extra ui python main.py a2a --print-card")
