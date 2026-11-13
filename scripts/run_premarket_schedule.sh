@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Phase 4：台北 05:30 後產一份全站共用開盤前 brief（給 cron 呼叫）。
+# Phase 4：台北 06:00 後產一份全站共用開盤前 brief（給 cron 呼叫）。
 # macOS cron 常讀不到外接碟上的 .sh；crontab 請指向內建碟副本，例如：
 #   ~/.local/bin/run_premarket_schedule.sh
 set -u

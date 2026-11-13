@@ -59,6 +59,7 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
     "gate-stats": (ROOT / "tools" / "gate_stats.py", None),
     "outcome-label": (ROOT / "tools" / "outcome_label.py", None),
     "calibrate": (ROOT / "tools" / "calibrate_thresholds.py", None),
+    "eval-calls": (ROOT / "tools" / "eval_calls.py", None),
 }
 
 # Phase 0: these commands share agent.tools / skill functions in-process.

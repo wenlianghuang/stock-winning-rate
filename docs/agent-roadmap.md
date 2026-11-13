@@ -47,7 +47,7 @@
 | 開盤前日報／週報 | `market-daily/`、`market-weekly/` | `reports/market/` |
 | Grounded chat | `market_day_chat.py`、`POST /market-daily/chat/stream`；個股見 [`stock-report-chat.md`](./stock-report-chat.md) | facts 優先、長尾才 LLM |
 | HTTP 工作流 | `api/stock_api.py` | `/jobs`、`/digest`、portfolio／market jobs |
-| 品質回饋 | `tools/gate_stats.py`、`outcome-label`、`calibrate` | 校準與事後標籤 |
+| 品質回饋 | `tools/gate_stats.py`、`outcome-label`、`calibrate`、`eval-calls` | 校準、事後標籤、傾向對帳（準確性／穩定性分開） |
 
 `pyproject.toml` 的 `mcp` extra 在 Phase 1 落地；`a2a` extra 在 Phase 5 落地。
 

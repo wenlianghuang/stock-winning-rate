@@ -274,6 +274,11 @@ uv run python main.py calibrate -- --stock 2409
 # gate 品質統計（掃 reports/stock/**/*.gate.log）
 uv run python main.py gate-stats
 uv run python main.py gate-stats -- --date 2026-08-18 --stock 2330 --json
+
+# 報告傾向對帳：準確性（5 日超額）與穩定性（gate 輪次）分開
+# 5 個交易日後、outcome-label 更新完再跑。產物在 reports/eval/
+uv run python main.py eval-calls
+uv run python main.py eval-calls -- --date 2026-08-18 --stock 2330 --json
 ```
 
 ---
