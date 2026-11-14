@@ -19,6 +19,7 @@ from day_window import (  # noqa: E402
     CUTOVER_HOUR,
     CUTOVER_MINUTE,
     TAIPEI_TZ,
+    DayWindow,
     resolve_day_window,
     resolve_trade_date,
     resolve_us_as_of,
@@ -26,10 +27,17 @@ from day_window import (  # noqa: E402
 from market_day_signals import (  # noqa: E402
     alignment_label,
     build_institutional_block,
+    build_market_day_facts,
     build_volume_block,
     compute_bias_hint,
     day_return_pct,
     institutional_consensus,
+)
+from tx_night import (  # noqa: E402
+    build_tx_night_block,
+    fetch_tx_night_block,
+    parse_tx_csv,
+    session_window_label,
 )
 from market_day_summary import build_market_day_summary  # noqa: E402
 from validate_market_day import validate_market_day_report  # noqa: E402
@@ -264,6 +272,161 @@ class TestMarketDaySummaryExtract(unittest.TestCase):
         self.assertIn("\n", summary["dashboard"])
         self.assertIn("1. **觀察加權**", summary["dashboard"])
         self.assertIn("2. **觀察台積電**", summary["dashboard"])
+
+
+TX_HEADER = (
+    "交易日期,契約,到期月份(週別),開盤價,最高價,最低價,收盤價,漲跌價,漲跌%,"
+    "成交量,結算價,未沖銷契約數,最後最佳買價,最後最佳賣價,歷史最高價,歷史最低價,"
+    "是否因訊息面暫停交易,交易時段,價差對單式委託成交量"
+)
+
+WEEKDAY_TX_CSV = f"""{TX_HEADER}
+2026/11/12,TX,202611,44166,44555,43057,43178,-958,-2.17%,87240,43128,113812,43176,43196,50440,37694,,一般,,
+2026/11/12,TX,202612,44157,44591,43122,43211,-939,-2.13%,3754,43160,12788,43215,43238,50560,27382,,一般,
+2026/11/13,TX,202611/202612,1,2,0,1,-,-,500,-,-,1,2,3,0,,盤後,1
+2026/11/13,TX,202612,43336,44045,42422,43718,558,1.29%,1679,-,-,43691,43716,50560,27382,,盤後,
+2026/11/13,TX,202611,43180,44034,42371,43676,548,1.27%,79972,-,-,43654,43674,50440,37694,,盤後,
+"""
+
+WEEKEND_TX_CSV = f"""{TX_HEADER}
+2026/11/06,TX,202611,41000,41200,39000,39786,-2096,-5.02%,143277,39652,100,39780,39790,50440,37694,,一般,
+2026/11/09,TX,202612,40000,41000,39900,40800,700,1.75%,100,-,-,40700,40800,50560,27382,,盤後,
+2026/11/09,TX,202611,39800,40400,39700,40298,646,1.63%,69882,-,-,40290,40300,50440,37694,,盤後,
+"""
+
+
+class TestTxNight(unittest.TestCase):
+    def test_weekday_front_month_uses_settlement_gap(self) -> None:
+        block = build_tx_night_block(
+            parse_tx_csv(WEEKDAY_TX_CSV),
+            trade_date="2026-11-12",
+            for_session="2026-11-13",
+        )
+        self.assertTrue(block["available"])
+        self.assertEqual(block["contract_month"], "202611")
+        self.assertEqual(block["close"], 43676)
+        self.assertEqual(block["change"], 548)
+        self.assertEqual(block["change_pct"], 1.27)
+        self.assertEqual(block["volume"], 79972)
+        self.assertEqual(block["session_window"], "2026-11-12 15:00–2026-11-13 05:00")
+        self.assertEqual(block["prior_regular"]["settlement"], 43128)
+        self.assertEqual(block["prior_regular"]["close"], 43178)
+
+    def test_monday_row_is_friday_night_not_sunday(self) -> None:
+        block = build_tx_night_block(
+            parse_tx_csv(WEEKEND_TX_CSV),
+            trade_date="2026-11-06",
+            for_session="2026-11-09",
+        )
+        self.assertEqual(block["attribution_date"], "2026-11-09")
+        self.assertEqual(session_window_label("2026-11-06"), "2026-11-06 15:00–2026-11-07 05:00")
+        self.assertEqual(block["session_window"], "2026-11-06 15:00–2026-11-07 05:00")
+        self.assertEqual(block["change"], 646)
+        self.assertEqual(block["prior_regular"]["settlement"], 39652)
+        self.assertNotIn("2026-11-08", block["session_window"])
+
+    def test_retries_until_session_row_exists(self) -> None:
+        calls = {"n": 0}
+
+        def fetch(_start: str, _end: str) -> str:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return TX_HEADER + "\n"
+            return WEEKDAY_TX_CSV
+
+        slept: list[float] = []
+        block = fetch_tx_night_block(
+            trade_date="2026-11-12",
+            for_session="2026-11-13",
+            attempts=2,
+            backoff_sec=5,
+            sleep=slept.append,
+            fetch_csv=fetch,
+        )
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(slept, [5])
+        self.assertTrue(block["available"])
+        self.assertEqual(block["change"], 548)
+
+    def test_gives_up_without_raising(self) -> None:
+        def fetch(_start: str, _end: str) -> str:
+            raise RuntimeError("down")
+
+        block = fetch_tx_night_block(
+            trade_date="2026-11-12",
+            for_session="2026-11-13",
+            attempts=1,
+            fetch_csv=fetch,
+        )
+        self.assertFalse(block["available"])
+        self.assertIn("fetch_error", block["skip_reason"])
+
+    def test_bias_hint_ignores_night_gap(self) -> None:
+        window = DayWindow(
+            trade_date="2026-11-12",
+            for_session="2026-11-13",
+            prior_trade_date="2026-11-11",
+            lookback_days=["2026-11-11", "2026-11-12"],
+            resolved_as_of="2026-11-13T05:30:00+08:00",
+            cutover_applied=True,
+            us_as_of="2026-11-13",
+            us_cutover_passed=True,
+        )
+
+        def us_fetch(_as_of: str) -> dict:
+            return {
+                "available": True,
+                "indices": {
+                    "IXIC": {"day_return_pct": 1.1, "session_date": "2026-11-12"},
+                    "SOX": {"day_return_pct": 0.4, "session_date": "2026-11-12"},
+                },
+            }
+
+        with (
+            patch("market_day_signals.fetch_taiex_rows", return_value={}),
+            patch("market_day_signals.fetch_institutional_rows", return_value=[]),
+            patch("market_day_signals.fetch_stock_day", return_value={}),
+        ):
+            facts = build_market_day_facts(
+                window,
+                us_attempts=1,
+                us_backoff_sec=0,
+                us_sleep=lambda _sec: None,
+                us_fetch=us_fetch,
+                tx_attempts=1,
+                tx_backoff_sec=0,
+                tx_sleep=lambda _sec: None,
+                tx_fetch=lambda _start, _end: WEEKDAY_TX_CSV,
+            )
+        self.assertEqual(facts.bias_hint, "neutral")
+        self.assertEqual(facts.tx_night["change"], 548)
+        self.assertEqual(facts.tx_night["alignment_vs_ixic"], "一致")
+        self.assertTrue(any("台指期盤後" in line for line in facts.anchors))
+
+
+class TestTxNightValidation(unittest.TestCase):
+    def test_requires_gap_citation(self) -> None:
+        facts = {
+            "tx_night": {
+                "available": True,
+                "change": 548,
+                "change_pct": 1.27,
+                "alignment_vs_ixic": "一致",
+            }
+        }
+        result = validate_market_day_report("夜盤下跌，沒有數字。", facts)
+        codes = {issue.code for issue in result.issues}
+        self.assertIn("tx_direction", codes)
+        self.assertIn("missing_tx_change", codes)
+        self.assertIn("missing_tx_gap", codes)
+
+    def test_unavailable_needs_explicit_sentence(self) -> None:
+        result = validate_market_day_report("外盤只有那指。", {"tx_night": {"available": False}})
+        self.assertIn("missing_tx_night", {issue.code for issue in result.issues})
+
+    def test_legacy_facts_without_night_key(self) -> None:
+        result = validate_market_day_report("沒有夜盤欄位。", {})
+        self.assertNotIn("missing_tx_night", {issue.code for issue in result.issues})
 
 
 if __name__ == "__main__":

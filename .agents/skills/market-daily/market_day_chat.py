@@ -114,7 +114,7 @@ FACTUAL_SLOT_PATTERNS: tuple[tuple[FactualSlot, tuple[str, ...]], ...] = (
     ),
     (
         "us",
-        (r"那指", r"費半", r"那斯達克", r"nasdaq", r"sox", r"美股", r"外盤"),
+        (r"那指", r"費半", r"那斯達克", r"nasdaq", r"sox", r"美股", r"外盤", r"夜盤", r"台指期"),
     ),
     (
         "technical",
@@ -154,6 +154,20 @@ def load_artifacts(trade_date: str) -> dict[str, Any]:
     )
     markdown = md_file.read_text(encoding="utf-8") if md_file.exists() else None
     return {"facts": facts, "summary": summary, "markdown": markdown}
+
+
+def _compact_tx_night(tx: Any) -> dict[str, Any]:
+    if not isinstance(tx, dict) or not tx:
+        return {}
+    return {
+        "available": bool(tx.get("available")),
+        "contract_month": tx.get("contract_month"),
+        "session_window": tx.get("session_window"),
+        "close": tx.get("close"),
+        "change": tx.get("change"),
+        "change_pct": tx.get("change_pct"),
+        "alignment_vs_ixic": tx.get("alignment_vs_ixic"),
+    }
 
 
 def _compact_facts(facts: dict[str, Any] | None) -> dict[str, Any]:
@@ -210,6 +224,7 @@ def _compact_facts(facts: dict[str, Any] | None) -> dict[str, Any]:
             "ixic_vs_taiex": alignment.get("ixic_vs_taiex"),
             "sox_vs_tsmc": alignment.get("sox_vs_tsmc"),
         },
+        "tx_night": _compact_tx_night(facts.get("tx_night")),
         "anchors": (facts.get("anchors") or [])[:12],
     }
 
@@ -293,6 +308,36 @@ def _extract_bias_hint(
     if facts and facts.get("bias_hint"):
         return str(facts["bias_hint"])
     return None
+
+
+def _fmt_points(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "—"
+    number: int | float = int(value) if float(value).is_integer() else value
+    prefix = "+" if number > 0 else ""
+    return f"{prefix}{number} 點"
+
+
+def _tx_night_lines(facts: dict[str, Any], summary: dict[str, Any]) -> list[str]:
+    raw = facts.get("tx_night")
+    tx = raw if isinstance(raw, dict) and raw else None
+    if tx is None:
+        summary_tx = summary.get("tx_night")
+        tx = summary_tx if isinstance(summary_tx, dict) and summary_tx else None
+    if not tx:
+        return []
+    if not tx.get("available"):
+        return ["- 台指夜盤資料不足。"]
+    month = tx.get("contract_month") or "近月"
+    window = tx.get("session_window") or "—"
+    align = tx.get("alignment_vs_ixic") or "—"
+    return [
+        (
+            f"- 台指期盤後 {month}（{window}）："
+            f"相對前一日結算價 {_fmt_points(tx.get('change'))}"
+            f"（{_fmt_pct(tx.get('change_pct'))}），與那指{align}"
+        )
+    ]
 
 
 def _fmt_pct(value: Any) -> str:
@@ -428,6 +473,7 @@ def build_factual_slot_reply(
                     f"- 費半日報酬：{_fmt_pct(sox_ret)}（vs 台積電：{sox_align or '—'}）",
                 ]
             )
+        lines.extend(_tx_night_lines(facts, summary))
 
     elif slot == "technical":
         technical = facts.get("technical") or summary.get("technical") or {}

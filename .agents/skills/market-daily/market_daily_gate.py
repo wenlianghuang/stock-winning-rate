@@ -96,7 +96,7 @@ def write_markdown(path: Path, body: str, facts: dict[str, Any]) -> None:
     header = (
         f"# 台股開盤前戰術 brief（{facts.get('trade_date')} → "
         f"{facts.get('for_session')} 開盤）\n\n"
-        f"> Phase 1：量價／法人／技術／2330／那指費半；未納入台指夜盤\n\n"
+        f"> 量價／法人／技術／2330／那指費半／台指期盤後。夜盤只描述開盤缺口，不改偏誤分數。\n\n"
     )
     path.write_text(header + body.strip() + "\n", encoding="utf-8")
 

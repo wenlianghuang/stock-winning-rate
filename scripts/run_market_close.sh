@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 交易日 17:30 後產台股收盤日報（給 cron 呼叫）。
-# macOS cron 常讀不到外接碟上的 .sh；crontab 請指向內建碟副本，例如：
+# 交易日 17:30 後產台股收盤日報。
+# 由登入階段的 LaunchAgent 呼叫內建碟副本：
+#   ~/Library/LaunchAgents/com.stock.market-close.plist
 #   ~/.local/bin/run_market_close.sh
-#   30 17 * * 1-5 ~/.local/bin/run_market_close.sh
 set -u
 
 export TZ=Asia/Taipei

@@ -1,6 +1,6 @@
 ---
 name: market-daily
-description: 台股開盤前戰術 brief：當日量價／三大法人／技術錨點／2330 + 那指費半 → agy 明日開盤偏誤（Phase 1，無夜盤）。
+description: 台股開盤前戰術 brief：當日量價／三大法人／技術錨點／2330 + 那指費半 + 台指期盤後缺口 → agy 明日開盤偏誤。夜盤不改 bias_hint。
 ---
 
 # Skill: Market Daily（開盤前戰術 brief）
@@ -12,9 +12,11 @@ description: 台股開盤前戰術 brief：當日量價／三大法人／技術�
 05:30 後抓美股失敗會重試，**不會**默默 `--skip-us`。全站共用一份產物；排程見 `python main.py schedule --once`。  
 報告服務的是 `for_session`（下一台股交易日）開盤偏誤，不是單點漲跌預測。
 
-Python 組 deterministic facts（加權量價、三大法人、MA／區間位置、2330、Yahoo 那指／費半日報酬），agy 寫短敘事，規則驗證閉環。
+Python 組 deterministic facts（加權量價、三大法人、MA／區間位置、2330、Yahoo 那指／費半日報酬、期交所 TX 盤後），agy 寫短敘事，規則驗證閉環。
 
-**Phase 1 不做**：台指夜盤、類股長排行、新聞長篇、縮小版週報。
+台指期盤後來自期交所 `futDataDown`（`交易時段=盤後`，近月成交量最大）。漲跌相對前一日一般交易時段結算價，只當 `for_session` 的開盤缺口；抓不到寫「台指夜盤資料不足」，不讓整份 brief 失敗，也不進 `bias_hint`。盤後只在營業日 15:00 開到次日曆日 05:00；週一那列是週五 15:00–週六 05:00。
+
+**不做**：類股長排行、新聞長篇、縮小版週報。
 
 ## Command
 

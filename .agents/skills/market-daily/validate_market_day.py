@@ -92,6 +92,53 @@ def _fact_number_tokens(facts: dict[str, Any]) -> list[str]:
     return out
 
 
+def _number_token(value: int | float) -> str:
+    return f"{float(value):.2f}".rstrip("0").rstrip(".")
+
+
+def _tx_night_issues(text: str, tx: Any) -> list[ValidationIssue]:
+    """Facts with a tx_night object must cite the gap, or say the data is missing."""
+    if not isinstance(tx, dict):
+        return []
+    issues: list[ValidationIssue] = []
+    if not tx.get("available"):
+        if "台指夜盤資料不足" not in text:
+            issues.append(
+                ValidationIssue("missing_tx_night", "台指夜盤不可用時須寫「台指夜盤資料不足」")
+            )
+        return issues
+    if "夜盤" not in text:
+        issues.append(ValidationIssue("missing_tx_night", "tx_night.available 時須提到夜盤"))
+    if "跳空" not in text and "回補" not in text:
+        issues.append(
+            ValidationIssue("missing_tx_gap", "夜盤須寫入開盤跳空延續或回補的觀察")
+        )
+    change = tx.get("change")
+    if isinstance(change, (int, float)):
+        token = _number_token(change)
+        if token not in text:
+            issues.append(
+                ValidationIssue("missing_tx_change", f"須引用夜盤漲跌 {token} 點")
+            )
+    change_pct = tx.get("change_pct")
+    if isinstance(change_pct, (int, float)):
+        token = _number_token(change_pct)
+        if token not in text and f"{token}%" not in text:
+            issues.append(
+                ValidationIssue("missing_tx_change_pct", f"須引用夜盤漲跌幅 {token}%")
+            )
+        if change_pct > 0 and any(phrase in text for phrase in ("夜盤下跌", "夜盤收跌", "夜盤走跌")):
+            issues.append(ValidationIssue("tx_direction", "夜盤上漲，不可寫夜盤下跌"))
+        if change_pct < 0 and any(phrase in text for phrase in ("夜盤上漲", "夜盤收漲", "夜盤走揚")):
+            issues.append(ValidationIssue("tx_direction", "夜盤下跌，不可寫夜盤上漲"))
+    align = tx.get("alignment_vs_ixic")
+    if align in {"一致", "背離"} and align not in text:
+        issues.append(
+            ValidationIssue("missing_tx_alignment", f"須寫夜盤與那指「{align}」")
+        )
+    return issues
+
+
 def validate_market_day_report(body: str, facts: dict[str, Any]) -> ValidationResult:
     issues: list[ValidationIssue] = []
     text = body or ""
@@ -144,6 +191,8 @@ def validate_market_day_report(body: str, facts: dict[str, Any]) -> ValidationRe
             issues.append(
                 ValidationIssue("missing_market_return", f"須引用大盤日報酬 {raw}%")
             )
+
+    issues.extend(_tx_night_issues(text, facts.get("tx_night")))
 
     us = facts.get("us") or {}
     if us.get("available"):

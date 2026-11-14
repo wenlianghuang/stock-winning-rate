@@ -63,7 +63,7 @@ uv run --extra stock --extra ui python main.py schedule --once
 uv run --extra ui --extra stock python main.py market-weekly
 uv run --extra ui --extra stock python main.py market-weekly -- --week-end 2026-07-31
 uv run --extra ui --extra stock python main.py market-weekly -- --resolve-only
-# crontab：30 17 * * 5  … scripts/run_market_weekly.sh
+# 排程不走 crontab，見 docs/schedule.md
 
 # 日報 grounded chat（讀既有 facts，不重跑 gate）
 uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎麼做？" --dry-run --json
@@ -72,7 +72,7 @@ uv run python main.py market-daily-chat -- --date 2026-08-13 -m "今天外資怎
 uv run --extra ui --extra stock python main.py market-close
 uv run --extra ui --extra stock python main.py market-close -- --resolve-only
 uv run --extra ui --extra stock python main.py market-close -- --date 2026-10-29 --skip-agy
-# crontab：30 17 * * 1-5  … scripts/run_market_close.sh
+# 排程不走 crontab，見 docs/schedule.md
 ```
 
 ---
@@ -227,8 +227,7 @@ uv run --extra stock --extra ui python main.py agent --replay reports/agent/2026
 ```bash
 uv run --extra stock --extra ui python main.py schedule --once --dry-run
 uv run --extra stock --extra ui python main.py schedule --once
-# crontab：30 5 * * 2-6  … schedule --once
-# crontab：30 17 * * 5    … market-weekly
+# 到點自動跑見 docs/schedule.md（LaunchAgent，不要寫 crontab）
 ```
 
 敘事引擎：`LLM_BACKEND=agy`（預設）或 `ollama`。

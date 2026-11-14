@@ -19,7 +19,10 @@ FORMAT_RULES = """
 若 us.available：用 1～3 點 `-` 條列，引用那指／費半日報酬 + 台股／台積電對應數字，使用 facts.alignment 的 **一致** 或 **背離**。
 美股 session 以 facts.us.as_of／indices.*.session_date 為準（台北 05:30 cutover：過了用最新收盤，沒到用前一日）。
 若 us.available 為 false：寫「美股指數資料不足」。
-Phase 1 無台指夜盤：可一句註明「本版未納入台指夜盤」。
+若 tx_night.available：再加 1 點，引用近月台指期盤後相對前一日一般交易時段結算價的漲跌點數與漲跌%。那指可用時，用 facts.tx_night.alignment_vs_ixic 的 **一致** 或 **背離**。
+時段只許使用 facts.tx_night.session_window（營業日 15:00 至次日曆日 05:00；週一那列是週五 15:00–週六 05:00，不是週日夜盤）。
+夜盤漲跌是開盤缺口，不得改寫 bias_hint，也不得寫成開盤保證。
+若 tx_night.available 為 false：寫「台指夜盤資料不足」。
 
 ## 三、明日開盤偏誤（核心）
 讀者情境：依 trade_date 收盤籌碼，為 **for_session** 開盤做準備。
@@ -34,6 +37,7 @@ Phase 1 無台指夜盤：可一句註明「本版未納入台指夜盤」。
 
 ## 四、開盤儀表板
 條列至少 4 項：「觀察什麼 → 若出現 → 較支持／否決哪一情境」。
+若 tx_night.available：其中 1 項為夜盤相對前一日結算價的漲跌 → 若開盤跳空延續或回補 → 較支持／否決哪一情境。
 禁止保證獲利或下單指令。
 
 ## 五、免責聲明

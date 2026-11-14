@@ -1,6 +1,7 @@
 #!/bin/zsh
-# 週五 17:30 後產市場週報（給 cron 呼叫）。
-# macOS cron 常讀不到外接碟上的 .sh；crontab 請指向內建碟副本，例如：
+# 週五 17:30 後產市場週報。
+# 由登入階段的 LaunchAgent 呼叫內建碟副本：
+#   ~/Library/LaunchAgents/com.stock.market-weekly.plist
 #   ~/.local/bin/run_market_weekly.sh
 set -u
 

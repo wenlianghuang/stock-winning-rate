@@ -104,6 +104,7 @@ class TestFactualSlots(unittest.TestCase):
         self.assertEqual(match_factual_slot("量能如何"), "volume")
         self.assertEqual(match_factual_slot("台積電怎麼了"), "tsmc")
         self.assertEqual(match_factual_slot("那指費半"), "us")
+        self.assertEqual(match_factual_slot("台指夜盤怎麼走"), "us")
         self.assertIsNone(match_factual_slot("隨便聊聊天氣"))
 
     def test_foreign_template_preserves_direction(self) -> None:
@@ -115,6 +116,24 @@ class TestFactualSlots(unittest.TestCase):
         self.assertIn(DISCLAIMER, reply)
         # Must not claim foreign net is 買超 when negative.
         self.assertRegex(reply, r"外資淨額：.*賣超")
+
+    def test_us_slot_includes_night_gap(self) -> None:
+        facts = {
+            **SAMPLE_FACTS,
+            "tx_night": {
+                "available": True,
+                "contract_month": "202611",
+                "session_window": "2026-11-06 15:00–2026-11-07 05:00",
+                "change": 646,
+                "change_pct": 1.63,
+                "alignment_vs_ixic": "一致",
+            },
+        }
+        reply = build_factual_slot_reply("us", facts=facts, summary=SAMPLE_SUMMARY)
+        self.assertIn("2026-11-06 15:00–2026-11-07 05:00", reply)
+        self.assertIn("+646 點", reply)
+        self.assertIn("+1.63%", reply)
+        self.assertNotIn("週日", reply)
 
     def test_bias_template(self) -> None:
         reply = build_factual_slot_reply(

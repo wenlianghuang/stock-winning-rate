@@ -1,4 +1,4 @@
-"""Deterministic market-day facts: TAIEX volume/price, institutions, 2330, US day."""
+"""Deterministic market-day facts: TAIEX volume/price, institutions, 2330, US day, TX night."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ US_FETCH_ATTEMPTS = 3
 US_FETCH_BACKOFF_SEC = 15.0
 
 from day_window import DayWindow, resolve_day_window
+from tx_night import empty_tx_night, fetch_tx_night_block
 
 FOREIGN_NAMES = {"Foreign_Investor", "Foreign_Dealer_Self"}
 TRUST_NAMES = {"Investment_Trust"}
@@ -66,6 +67,7 @@ class MarketDayFacts:
     technical: dict[str, Any] = field(default_factory=dict)
     tsmc: dict[str, Any] = field(default_factory=dict)
     us: dict[str, Any] = field(default_factory=dict)
+    tx_night: dict[str, Any] = field(default_factory=dict)
     bias_hint: str = "neutral"
     anchors: list[str] = field(default_factory=list)
 
@@ -474,7 +476,10 @@ def compute_bias_hint(
     technical: dict[str, Any],
     us: dict[str, Any],
 ) -> str:
-    """Conservative rule blend; neutral unless multiple signals agree."""
+    """Conservative cash-structure blend; neutral unless multiple signals agree.
+
+    TX night is an opening-gap fact and is intentionally not an input.
+    """
     score = 0
     ret = market.get("day_return_pct")
     if isinstance(ret, (int, float)):
@@ -558,8 +563,24 @@ def build_anchors(facts: MarketDayFacts) -> list[str]:
         anchors.append(f"那指日報酬 {ixic['day_return_pct']}%")
     if sox and sox.get("day_return_pct") is not None:
         anchors.append(f"費半日報酬 {sox['day_return_pct']}%")
+    tx = facts.tx_night or {}
+    if tx.get("available") and isinstance(tx.get("change"), (int, float)):
+        points = tx["change"]
+        prefix = "+" if points > 0 else ""
+        pct = tx.get("change_pct")
+        pct_text = f"（{pct}%）" if isinstance(pct, (int, float)) else ""
+        anchors.append(f"台指期盤後 {tx.get('contract_month')} {prefix}{points}點{pct_text}")
     anchors.append(f"開盤偏誤提示 {BIAS_LABEL.get(facts.bias_hint, facts.bias_hint)}")
     return anchors
+
+
+def _ixic_day_return(us_block: dict[str, Any]) -> float | None:
+    indices = us_block.get("indices") if isinstance(us_block.get("indices"), dict) else {}
+    ixic = indices.get("IXIC") if isinstance(indices.get("IXIC"), dict) else None
+    value = ixic.get("day_return_pct") if ixic else None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def us_block_usable(block: dict[str, Any] | None) -> bool:
@@ -617,6 +638,11 @@ def build_market_day_facts(
     us_backoff_sec: float = US_FETCH_BACKOFF_SEC,
     us_sleep: Callable[[float], None] | None = None,
     us_fetch: Callable[[str], dict[str, Any]] | None = None,
+    skip_tx: bool = False,
+    tx_attempts: int = 3,
+    tx_backoff_sec: float = 5.0,
+    tx_sleep: Callable[[float], None] | None = None,
+    tx_fetch: Callable[[str, str], str] | None = None,
     finmind_token: str | None = None,
 ) -> MarketDayFacts:
     ensure_import_paths()
@@ -686,6 +712,23 @@ def build_market_day_facts(
             tsmc_day_return=tsmc_ret_f,
         )
 
+    if skip_tx:
+        tx_block = empty_tx_night(reason="skip_tx")
+    else:
+        tx_block = fetch_tx_night_block(
+            trade_date=window.trade_date,
+            for_session=window.for_session,
+            attempts=tx_attempts,
+            backoff_sec=tx_backoff_sec,
+            sleep=tx_sleep,
+            fetch_csv=tx_fetch,
+        )
+        ixic_ret = _ixic_day_return(us_block)
+        if tx_block.get("available"):
+            change_pct = tx_block.get("change_pct")
+            pct = float(change_pct) if isinstance(change_pct, (int, float)) else None
+            tx_block["alignment_vs_ixic"] = alignment_label(pct, ixic_ret)
+
     facts = MarketDayFacts(
         trade_date=window.trade_date,
         for_session=window.for_session,
@@ -701,6 +744,7 @@ def build_market_day_facts(
         technical=technical,
         tsmc=tsmc,
         us=us_block,
+        tx_night=tx_block,
     )
     facts.bias_hint = compute_bias_hint(
         market=market,
@@ -752,6 +796,9 @@ def facts_summary_for_prompt(facts: MarketDayFacts) -> str:
         "",
         "=== 美股日事實（那指／費半；依 us_as_of；數字不可改寫）===",
         json.dumps(facts.us or {}, ensure_ascii=False, indent=2),
+        "",
+        "=== 台指期盤後（開盤缺口；漲跌相對前一日一般交易時段結算價；不進 bias_hint）===",
+        json.dumps(facts.tx_night or {}, ensure_ascii=False, indent=2),
         "",
         "=== anchors ===",
         "\n".join(f"- {a}" for a in facts.anchors),

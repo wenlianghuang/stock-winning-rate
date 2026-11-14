@@ -79,7 +79,7 @@ Phase 4 只補兩件事：
 # 看這一輪會不會跑（不產報、不抓美股）
 uv run --extra stock --extra ui python main.py schedule --once --dry-run
 
-# cron / launchd：交易日（含週六，給下週一）05:30 後
+# 到點自動跑見 docs/schedule.md（LaunchAgent）。這行是手動產一次
 uv run --extra stock --extra ui python main.py schedule --once
 
 # 強制重跑
@@ -89,11 +89,7 @@ uv run --extra stock --extra ui python main.py schedule --once --force
 uv run --extra stock --extra ui python main.py schedule --loop --interval 300
 ```
 
-crontab 例（台北已是系統時區時）：
-
-```
-30 5 * * * cd /path/to/stock-winning-rate && uv run --extra stock --extra ui python main.py schedule --once
-```
+自動排程見 [`schedule.md`](./schedule.md)。不要把這份工作寫進 crontab：cron 不在圖形登入階段，讀不到鑰匙圈裡的 `agy` 登入。
 
 換敘事引擎：`LLM_BACKEND=ollama`（另設 `OLLAMA_BASE_URL` / `OLLAMA_MODEL`）。
 

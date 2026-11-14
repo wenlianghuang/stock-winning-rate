@@ -83,6 +83,23 @@ def _us_summary(facts: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tx_night_summary(facts: dict[str, Any]) -> dict[str, Any]:
+    tx = facts.get("tx_night") or {}
+    prior = tx.get("prior_regular") if isinstance(tx.get("prior_regular"), dict) else {}
+    return {
+        "available": bool(tx.get("available")),
+        "contract_month": tx.get("contract_month"),
+        "session_window": tx.get("session_window"),
+        "attribution_date": tx.get("attribution_date"),
+        "close": tx.get("close"),
+        "change": tx.get("change"),
+        "change_pct": tx.get("change_pct"),
+        "volume": tx.get("volume"),
+        "alignment_vs_ixic": tx.get("alignment_vs_ixic"),
+        "prior_settlement": prior.get("settlement"),
+    }
+
+
 def build_market_day_summary(
     facts: dict[str, Any],
     body: str,
@@ -118,6 +135,7 @@ def build_market_day_summary(
         "technical": facts.get("technical") or {},
         "tsmc": facts.get("tsmc") or {},
         "us": _us_summary(facts),
+        "tx_night": _tx_night_summary(facts),
         "bias": _extract_section(body, ("偏誤", "開盤"), max_chunks=20, max_chars=1600),
         "dashboard": _extract_section(body, ("儀表", "觀察"), max_chunks=12, max_chars=900),
         "external": _extract_section(body, ("外盤", "美股")),
