@@ -189,5 +189,20 @@ class TestCloseValidation(unittest.TestCase):
         self.assertFalse(result.passed)
 
 
+class TestCloseNarrativeSkill(unittest.TestCase):
+    def test_prompt_inlines_skill_body_and_facts(self) -> None:
+        from close_prompts import build_close_prompt
+
+        prompt = build_close_prompt(facts_summary="加權 +10")
+        self.assertIn("## 一、今日收盤", prompt)
+        self.assertIn("不可寫「明日開盤偏誤」", prompt)
+        self.assertIn(
+            "======= FACTS（唯讀）=======\n加權 +10\n======= END FACTS =======",
+            prompt,
+        )
+        self.assertNotIn("name: close-narrative", prompt)
+        self.assertNotIn("# 收盤日報正文", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
