@@ -13,7 +13,7 @@ description: 免費 RSS 彙整美股科技、那斯達克與費城半導體新�
 
 1. 多來源 RSS 抓取與去重
 2. Yahoo Finance 公開端點取得指數快照（無 API Key）
-3. agy 分析 → **Python 規則驗證** → 不合格則修正（loop engineering，預設最多 2 輪）
+3. agy 分析 → **Python 規則驗證** → 不合格則修正（loop engineering，預設最多 2 輪）。七頁標題與禁語在 `us-tech-narrative`
 4. 程式化產生指數表、走勢圖、新聞表
 5. 輸出 Markdown / 橫式 slide HTML / PDF
 

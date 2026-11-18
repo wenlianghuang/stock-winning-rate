@@ -87,9 +87,7 @@ python3 .agents/skills/concept-news/cluster_events.py \
 
 ## 5. 報告與驗證
 
-只讀 `YYYY-MM-DD_events.json`。agy 寫一頁三段：看法、收盤後、來源列表。不下買賣建議，不補事件表沒有的數字。沒有出現在該事件 `mentioned_ids` 的股號，不寫成被點名或被提到。
-
-結論只寫報告日當天、台北時間 13:30 以後的收盤。看法是依照這些新聞寫出的判斷和結論：對題材代表什麼、不代表什麼，以及理由。看法不寫阿拉伯數字，也不照抄標題。前一日的收盤不當依據；方向對得上時，看法用一句話寫「違逆」或「順從」，結論仍以今日為準。對不上方向就不寫這兩個詞。「收盤後」只留稿子寫的事實，一件一行，不解釋差額、不換算、不寫意義。09:00 到 13:30 以前是盤中，更早是盤前，也不進「收盤後」和「來源列表」。不要逐則寫稿面抄了什麼、沒寫什麼。
+正文的章節與禁語在 `concept-narrative`。本檔只說明怎麼跑 gate。agy 只讀 `YYYY-MM-DD_events.json`。
 
 驗證最多兩輪。沒過就把問題交回 agy 重寫。通過才寫 `YYYY-MM-DD_summary.md`。每一輪追加 `YYYY-MM-DD.gate.log`，該輪的 prompt、正文、驗證留在 `YYYY-MM-DD.gate.rounds/`。已有 summary 時不重跑，除非加 `--force`。
 

@@ -181,6 +181,9 @@ def build_fix_prompt(
     previous_body: str,
     validation: ValidationResult,
 ) -> str:
+    _ensure_import_paths()
+    from stock_prompts import narrative_rules
+
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", stock_id)).strip()
     issues = _targeted_fix_lines(validation, facts_summary)
@@ -192,16 +195,8 @@ def build_fix_prompt(
         f"=== facts 結束 ===\n\n"
         f"驗證問題（含修正指引）：\n{issues}\n\n"
         f"新聞狀態：{news_note}\n\n"
-        "修正要求：\n"
-        "- 方向（買/賣、偏多/偏空、站上/跌破 MA5）必須與 facts 一致\n"
-        "- 正文須明確引用 facts 的 anchors（至少 2 條）\n"
-        "- 籌碼數字由系統表格自動產生，正文勿重複列數字\n"
-        "- 僅「近期新聞與事件」使用 Markdown 表格\n"
-        "- 交叉對照、情境推演、觀察重點請用**文字條列**，不要用表格\n"
-        "- 須含「近 N 日籌碼趨勢」章節，描述延續/轉折/背離\n"
-        "- 補齊缺少的章節與免責聲明\n"
-        "- 不可臆造新聞；僅能引用系統提供的新聞或註明缺少新聞\n"
-        "- 不要加工作摘要或工具操作說明\n\n"
+        "寫作規格如下，不要再讀 skill 檔。依該規格與下列問題重寫完整正文。\n\n"
+        f"{narrative_rules()}\n\n"
         "上一版全文：\n"
         f"{previous_body.strip()}\n"
     )

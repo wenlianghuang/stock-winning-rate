@@ -11,6 +11,8 @@ Loop engineering 工具：在 **CSV 已存在** 的前提下，用 agy 產出單
 
 分析須參考 **快照 CSV**（當日 + 區間摘要）與 **歷史 CSV**（近 N 日逐日明細）。
 
+正文的章節與禁語在 `stock-narrative`。本檔只說明怎麼跑 gate。
+
 **不包含** 拉取籌碼資料；請先執行 `tw-stock-report`。
 
 ## Setup

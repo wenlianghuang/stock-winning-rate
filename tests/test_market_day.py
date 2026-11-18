@@ -429,5 +429,20 @@ class TestTxNightValidation(unittest.TestCase):
         self.assertNotIn("missing_tx_night", {issue.code for issue in result.issues})
 
 
+class TestDailyNarrativeSkill(unittest.TestCase):
+    def test_prompt_inlines_skill_body_and_facts(self) -> None:
+        from market_day_prompts import build_market_day_prompt
+
+        prompt = build_market_day_prompt(facts_summary="bias_hint=neutral")
+        self.assertIn("## 三、明日開盤偏誤", prompt)
+        self.assertIn("不得改寫 bias_hint", prompt)
+        self.assertIn(
+            "======= FACTS（唯讀）=======\nbias_hint=neutral\n======= END FACTS =======",
+            prompt,
+        )
+        self.assertNotIn("name: daily-narrative", prompt)
+        self.assertNotIn("# 開盤前正文", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

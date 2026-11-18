@@ -279,6 +279,9 @@ def build_fix_prompt(
     validation: ValidationResult,
     position_facts_summary: str | None = None,
 ) -> str:
+    _ensure_import_paths()
+    from position_prompts import narrative_rules
+
     stock_id = str(row.get("代碼", "")).strip()
     stock_name = str(row.get("名稱", stock_id)).strip()
     issues = _targeted_fix_lines(validation)
@@ -298,20 +301,8 @@ def build_fix_prompt(
         f"驗證問題（含修正指引）：\n{issues}\n\n"
         f"持股均價：{holding.avg_cost} 元，{holding.shares:,} 股\n"
         f"新聞狀態：{news_note}\n\n"
-        "修正要求：\n"
-        "- 市場面方向（外資買/賣、站上/跌破 MA5）必須與籌碼 facts 一致\n"
-        "- 部位現況須對齊系統試算的 MA20（月線）與持股均價關係\n"
-        "- 市場面須明確引用 facts 概念（至少 2 項）\n"
-        "- 籌碼與部位數字由系統表格自動產生，正文勿重複列數字\n"
-        "- 須含部位現況、市場面摘要、交叉對照、操作情境、風險提醒、免責聲明\n"
-        "- 操作情境須含觸發條件，並依系統給定的三種市場情境權重（勿改百分比）撰寫\n"
-        "- 操作情境須標示主線/次線/尾線，並提及觀望/減碼/加碼/停損/獲利了結等方向\n"
-        "- 若系統提供融資維持率／距追繳／追繳價，須引用且不可改寫數字（單檔估算）\n"
-        "- 融資壓力 tight/critical 時須點出追繳線或距追繳，不可把技術反彈標成主線\n"
-        "- 市場面須客觀，勿因成本扭曲籌碼解讀\n"
-        "- 交叉對照、操作情境、風險提醒請用**文字條列**，不要用表格\n"
-        "- 不可臆造新聞；僅能引用系統提供的新聞或註明缺少新聞\n"
-        "- 不要加工作摘要或工具操作說明\n\n"
+        "寫作規格如下，不要再讀 skill 檔。依該規格與下列問題重寫完整正文。\n\n"
+        f"{narrative_rules()}\n\n"
         "上一版全文：\n"
         f"{previous_body.strip()}\n"
     )

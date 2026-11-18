@@ -215,6 +215,8 @@ class ConceptReportValidationTests(unittest.TestCase):
         self.assertIn("阿拉伯數字", prompt)
         self.assertIn("判斷和結論", prompt)
         self.assertIn("不要解釋", prompt)
+        self.assertIn("不要再讀 skill 檔", prompt)
+        self.assertNotIn("name: concept-narrative", prompt)
         self.assertNotIn("並陳差了多少", prompt)
         self.assertNotIn("## 稿面寫了什麼與沒寫什麼", prompt)
         self.assertNotIn("## 見解", prompt)

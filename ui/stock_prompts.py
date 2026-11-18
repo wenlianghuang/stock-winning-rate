@@ -1,47 +1,31 @@
-"""Shared agy prompt instructions for single-stock analysis (narrative only; no chip tables)."""
+"""Shared agy prompt instructions for single-stock analysis (narrative only; no chip tables).
+
+Writing rules live in the stock-narrative skill. This module only attaches
+the facts and news for the current run.
+"""
 
 from __future__ import annotations
 
-ANALYSIS_FORMAT_RULES = """
-輸出格式（Markdown）：
-- **不要**重複列出籌碼數字（數字以 facts.json 為準；籌碼表由網站摘要／圖表與 PDF 匯出呈現，正文不要列表格）
-- **數字與清單用表、解釋與推理用文字**（見各章節說明）
-- 分析須依據**系統已計算的籌碼事實（facts）**，方向判定不可與 facts 矛盾
-- 正文須明確引用 facts 中的 anchors（至少 2 條），作為趨勢與交叉對照的依據
-- 若 facts 標記**籌碼型態（chip_regime）**、**三大法人共識**或**主力外資背離**，趨勢段須明確說明
-- 技術面須同時說明**收盤相對 MA10（10 日線）與 MA20（月線）**的位置，並依 facts 的**兩兩對齊（MA5 vs MA10、MA10 vs MA20）**說明短線與月線是否一致
-- 若 facts 提供**均線排列（ma_stack）**、**均線交叉（ma5_cross_ma10 / ma10_cross_ma20）**、**月線斜率（ma20_slope）**、**RSI 動能（rsi_zone）**、**ATR 波動（volatility_regime）**、**ADX 趨勢強度（trend_strength）**、**券資比（margin_short_ratio_zone）**或 **融資動能（margin_momentum）**，須說明均線結構、交叉事件、動能、波動、趨勢強度與信用戶結構，且不可與 facts 矛盾
-- 若 facts 標記**成交量放量/縮量**、**量能趨勢（volume_trend）**或**價量關係（volume_price_divergence）**，敘述須與 facts 一致，不可矛盾
+from pathlib import Path
 
-## 一、當日籌碼解讀
-**純文字** 2～4 句，解讀當日法人/主力/融資券/當沖方向與意義（勿重複列數字、勿用表格）。
+_SKILL_PATH = Path(__file__).resolve().parent.parent / ".agents" / "skills" / "stock-narrative" / "SKILL.md"
 
-## 二、近 N 日籌碼趨勢解讀
-**純文字** 3～5 句，依歷史 CSV 與區間摘要判斷：
-- 法人/主力是**延續**、**轉折**還是**背離**？
-- 融資券餘額變化趨勢、當沖佔比是否異常？
-- 股價相對 **MA10（10 日線）與 MA20（月線）** 的技術位置，以及**短中線是否一致**（以 MA5 vs MA10、MA10 vs MA20 的兩兩對齊說明）；若 facts 提供 **RSI（14日）**，須說明動能是否過熱/偏弱；若 facts 提供 **ATR 波動**，須說明波動是否偏高/偏低；若 facts 提供 **ADX 趨勢強度**，須說明趨勢是否明確或易震盪
-（勿重複列數字、勿用表格）
 
-## 三、近期新聞與事件
-**必須使用 Markdown 表格**（此章節唯一必填表格）：
-| 日期 | 標題 | 分類 | 摘要 |
-（分類：利多 / 利空 / 中性；僅能引用提供的新聞）
-
-## 四、籌碼與新聞交叉對照
-**純文字** 2～4 點條列（`-` 開頭），結合**當日與近 N 日趨勢**說明籌碼與新聞是否一致或背離；**須同時引用籌碼與新聞依據**；
-交叉段請**原文引用**新聞標題（勿改寫標題文字）；若 facts 提供**大盤脈絡**，須說明個股相對大盤是強於/弱於/同步（勿把弱於大盤寫成抗跌）；**不要用表格**。
-
-## 五、短中線情境推演（1～3 個交易日）
-**純文字** 2～3 種情境，每種用一小段或條列，**必須**含「觸發條件」（若/一旦/條件/則）與「可追蹤訊號」（勿用「觀察」二字，以免與觀察重點章節混淆）；
-須納入近 N 日趨勢背景，**不要用表格**；不可寫保證漲跌或目標價。
-
-## 六、觀察重點
-**純文字** 編號清單（3～5 項），每項一句話；須含**可觀察指標**（外資/主力/均線/成交量/突破跌破等）；**不要用表格**。
-
-## 七、免責聲明
-一句話免責。
-""".strip()
+def narrative_rules() -> str:
+    """Return the skill body. Frontmatter and the title stay out of the prompt."""
+    text = _SKILL_PATH.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        raise ValueError(f"{_SKILL_PATH} 缺少 frontmatter")
+    end = text.find("\n---", 3)
+    if end == -1:
+        raise ValueError(f"{_SKILL_PATH} 的 frontmatter 沒有結束")
+    body = text[end + 4 :].strip()
+    lines = body.splitlines()
+    if lines and lines[0].startswith("# "):
+        body = "\n".join(lines[1:]).strip()
+    if "## 一、當日籌碼解讀" not in body:
+        raise ValueError(f"{_SKILL_PATH} 缺少當日籌碼章節規格")
+    return body
 
 
 def build_single_stock_analysis_prompt_suffix(
@@ -54,23 +38,10 @@ def build_single_stock_analysis_prompt_suffix(
     return (
         f"這是「單檔個股」分析任務：{stock_name}（{stock_id}）。\n"
         f"系統已完成籌碼資料的**確定性計算**，下方 facts 即是唯一事實來源；"
-        f"請**依 facts 撰寫分析正文**（Markdown），不要自行臆測與 facts 相反的方向。\n\n"
+        f"請**依 facts 撰寫分析正文**（Markdown），不要自行臆測與 facts 相反的方向。\n"
+        "寫作規格已附在下方，不要再讀 skill 檔，不要加工作摘要或工具操作說明。\n\n"
         f"=== 系統籌碼事實（facts）===\n{facts_summary}\n"
         f"=== facts 結束 ===\n\n"
         f"{news_section}\n\n"
-        f"{ANALYSIS_FORMAT_RULES}\n\n"
-        "其他要求：\n"
-        "- 方向（買/賣、偏多/偏空、站上/跌破 MA5 與 MA20 月線）必須與 facts 一致\n"
-        "- 技術面須涵蓋 MA20（月線），並用 MA5 vs MA10、MA10 vs MA20 的兩兩對齊描述短中線是否一致\n"
-        "- 若 facts 提供 ma_stack / ma20_slope / ma5_cross_ma10 / ma10_cross_ma20 / rsi_zone / volatility_regime / trend_strength / margin_short_ratio_zone / margin_momentum，須說明均線排列、交叉、月線斜率、RSI 動能、ATR 波動、ADX 趨勢強度、券資比與融資動能，且與 facts 一致\n"
-        "- 若 facts 提供大盤脈絡，個股相對大盤（強於/弱於/同步）須與 facts 的相對強弱一致\n"
-        "- 正文須明確引用 facts 的 anchors（至少 2 條）\n"
-        "- 主力外資背離、法人共識、chip_regime 須在趨勢/交叉段說明\n"
-        "- 若 facts 含歷史 forward 對照：優先寫平均超額；贏大盤占比標「無明顯邊緣」時禁止寫成勝率／上漲機率優勢\n"
-        "- 情境推演須寫觸發條件；觀察重點須可追蹤\n"
-        "- 新聞只能引用上方內容，不可臆造\n"
-        "- 趨勢判斷須依 facts 的區間欄位，避免僅依單日數據下結論\n"
-        "- 完整正文印在 stdout，不要只寫入檔案\n"
-        "- 不要加「工作摘要」或工具操作說明\n"
-        "- 不要寫「跨股票對照」章節\n"
+        f"{narrative_rules()}\n"
     )

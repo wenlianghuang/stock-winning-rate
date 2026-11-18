@@ -38,6 +38,24 @@ from validate_concept_report import (
 
 MAX_ROUNDS_DEFAULT = 2
 Completer = Callable[[str], tuple[str, int]]
+_SKILL_PATH = Path(__file__).resolve().parent.parent / "concept-narrative" / "SKILL.md"
+
+
+def narrative_rules() -> str:
+    """Return the skill body. Frontmatter and the title stay out of the prompt."""
+    text = _SKILL_PATH.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        raise ValueError(f"{_SKILL_PATH} 缺少 frontmatter")
+    end = text.find("\n---", 3)
+    if end == -1:
+        raise ValueError(f"{_SKILL_PATH} 的 frontmatter 沒有結束")
+    body = text[end + 4 :].strip()
+    lines = body.splitlines()
+    if lines and lines[0].startswith("# "):
+        body = "\n".join(lines[1:]).strip()
+    if "## 看法" not in body:
+        raise ValueError(f"{_SKILL_PATH} 缺少看法章節規格")
+    return body
 
 
 def default_events_path(theme_id: str, as_of: str, root: Path | None = None) -> Path:
@@ -100,40 +118,14 @@ def build_report_prompt(table: dict, events_path: Path, *, min_citations: int) -
         else "沒有可對照的前一日收盤方向。看法不要寫「違逆」或「順從」。\n"
     )
     return (
-        "請只根據下面這份事件表，寫一頁繁體中文（台灣用語）題材新聞。\n"
-        "不要讀其他檔案，不要用籌碼，不要補事件表裡沒有的數字，不要下買賣建議。\n"
-        "沒有出現在該事件 mentioned_ids 的股號，不要寫成被點名或被提到。\n\n"
-        "這頁的結論只寫報告日當天、台北時間 13:30 以後的收盤。"
-        "前一日的收盤、當天的盤中和盤前，都不在下面的事件表裡，也不能寫進「收盤後」或「來源列表」。\n"
-        "不要寫「稿面寫了」「稿面敘述」「稿面記載」，也不要逐則說明摘要沒寫到什麼。\n"
+        "這是「題材新聞」任務：只根據這一輪的事件表寫一頁。\n"
+        "寫作規格已附在下方，不要再讀 skill 檔，不要加工作摘要或工具操作說明。\n\n"
+        f"{narrative_rules()}\n\n"
         f"{relation_line}\n"
-        "「看法」是這頁的主體。依照今天的收盤後新聞，寫出你的判斷和結論，不要改寫新聞。\n"
-        "先寫結論：這批新聞對這個題材代表什麼、不代表什麼。"
-        "再寫理由：是在講產業變化還是特定股票的資金進出、同一件事被寫很多次會不會把分量放大、"
-        "公告或合作若沒有接到報價、產能、出貨就不能說成營運轉折。"
-        "若有「與前一日收盤」，用一句話寫違逆或順從，結論仍以今日為準。\n"
-        "看法完全不要阿拉伯數字、股號、代表標題，也不要逐則複述。\n\n"
         f"事件表路徑：{events_path}\n"
         f"題材：{table.get('label') or table.get('theme_id') or ''}\n"
         f"日期：{table.get('as_of') or ''}\n"
         f"{quota}\n\n"
-        "輸出三個段落，標題必須一字不差：\n\n"
-        "## 看法\n"
-        "寫判斷和結論。不要條列標題，不要寫數字。\n\n"
-        "## 收盤後\n"
-        "- 一件一行：代表標題，冒號，稿子寫的事實。數字照稿寫一次。\n"
-        "- 不要解釋。不要寫相差、係將、誤作、折合、不宜、這代表、意味、換言之、也就是說。\n"
-        "- 不要比較兩稿差多少，不要換算單位，不要寫這件事的意義。意義只放在看法。\n\n"
-        "## 來源列表\n"
-        "- 代表標題｜媒體｜網址\n"
-        "只列報告日當天的收盤事件。\n\n"
-        "規則：\n"
-        "- 「收盤後」和「來源列表」的標題只能用報告日當天收盤事件的 title，或該事件 sources 裡的 title\n"
-        "- 「看法」不能出現代表標題，也不能出現阿拉伯數字\n"
-        "- 股號只能出現在「收盤後」，而且只能來自該事件的 mentioned_ids\n"
-        "- 不要加工作摘要\n"
-        "- 不要寫「和前一份的差異」，這段由程式附在通過驗證的正文後面\n"
-        "- 完整正文印在 stdout\n\n"
         "事件表：\n"
         f"{payload}\n"
     )

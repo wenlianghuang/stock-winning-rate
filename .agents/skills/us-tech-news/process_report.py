@@ -25,6 +25,25 @@ from validate_tech_report import ValidationResult, normalize_slide_body, validat
 
 MAX_ROUNDS_DEFAULT = 2
 AGY_TIMEOUT_SEC = 900
+_SKILL_PATH = Path(__file__).resolve().parent.parent / "us-tech-narrative" / "SKILL.md"
+
+
+def narrative_rules() -> str:
+    """Return the skill body. Frontmatter and the title stay out of the prompt."""
+    text = _SKILL_PATH.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        raise ValueError(f"{_SKILL_PATH} 缺少 frontmatter")
+    end = text.find("\n---", 3)
+    if end == -1:
+        raise ValueError(f"{_SKILL_PATH} 的 frontmatter 沒有結束")
+    body = text[end + 4 :].strip()
+    lines = body.splitlines()
+    if lines and lines[0].startswith("# "):
+        body = "\n".join(lines[1:]).strip()
+    if "## 市場概況" not in body:
+        raise ValueError(f"{_SKILL_PATH} 缺少市場概況章節規格")
+    return body
+
 
 USER_AGENT = "Mozilla/5.0 (compatible; antigravity-agent/us-tech-news)"
 CONFIG_PATH = Path(__file__).with_name("feeds.json")
@@ -371,41 +390,12 @@ def build_agy_prompt(date_str: str, raw_path: Path, indices: list[IndexSnapshot]
     return (
         f"請讀取以下美股科技新聞彙整檔案，"
         f"撰寫繁體中文（台灣用語）簡報用分析內容，"
-        f"並將完整正文直接輸出到 stdout（Markdown）。\n\n"
+        f"並將完整正文直接輸出到 stdout（Markdown）。\n"
+        "寫作規格已附在下方，不要再讀 skill 檔，不要加工作摘要或工具操作說明。\n\n"
         f"報告日期：{date_str}\n"
         f"原始資料路徑：{raw_path}\n\n"
         f"指數快照（請在報告中引用，勿臆測數字）：\n{index_lines}\n\n"
-        "輸出格式（每個主題一頁 slide，以單獨一行的 --- 分隔）：\n"
-        "## 市場概況\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 那斯達克與費城半導體指數解讀\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 半導體與 AI 基建\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 大型科技動態\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 跨主題連動分析\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 值得後續關注\n"
-        "- 重點 bullet\n"
-        "---\n"
-        "## 新聞來源\n"
-        "- 標題（來源 feed）\n\n"
-        "要求：\n"
-        "- 必須先讀取原始資料檔再分析，不可臆測未收錄的新聞\n"
-        "- 每頁 slide 以 ## 標題開頭，正文用 - bullet 列點（每點 1～2 句）\n"
-        "- 僅根據原始資料中的新聞與指數，客觀中立，不提供買賣建議\n"
-        "- 若某主題在原始資料中資訊不足，請明確說明\n"
-        "- 完成初稿後自我檢查：指數數字、新聞事實是否與原始資料一致，"
-        "修正後再輸出最終版\n"
-        "- 完整報告必須印在 stdout，不要只寫入檔案\n"
-        "- 不要加「工作摘要」或工具操作說明\n"
-        "- 「新聞來源」slide 列出實際引用的新聞標題與來源 feed\n"
+        f"{narrative_rules()}\n"
     )
 
 
@@ -425,12 +415,8 @@ def build_fix_prompt(
         f"報告日期：{date_str}\n"
         f"原始資料路徑：{raw_path}\n\n"
         f"指數快照（數字必須完全一致，勿臆測）：\n{index_lines}\n\n"
-        "修正要求：\n"
-        "- 保留 7 個 slide 主題，以單獨一行的 --- 分隔\n"
-        "- 每頁以 ## 標題開頭，正文用 - bullet 列點\n"
-        "- 指數收盤價與漲跌幅必須與上方快照一致\n"
-        "- 「新聞來源」須引用原始資料中的真實新聞標題與 feed\n"
-        "- 不可提供買賣建議；不要加工作摘要\n\n"
+        "寫作規格如下，不要再讀 skill 檔。依該規格與下列問題重寫完整正文。\n\n"
+        f"{narrative_rules()}\n\n"
         "上一版全文：\n"
         f"{previous_body.strip()}\n"
     )
