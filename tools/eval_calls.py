@@ -139,7 +139,7 @@ def _load_outcomes(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
     return store
 
 
-def _excess(record: dict[str, Any] | None, horizon: str) -> float | None:
+def _horizon_slot(record: dict[str, Any] | None, horizon: str) -> dict[str, Any] | None:
     if not record:
         return None
     horizons = record.get("horizons")
@@ -148,13 +148,43 @@ def _excess(record: dict[str, Any] | None, horizon: str) -> float | None:
     slot = horizons.get(horizon)
     if not isinstance(slot, dict) or slot.get("status") != "resolved":
         return None
-    value = slot.get("excess_return_pct")
+    return slot
+
+
+def _as_float(value: Any) -> float | None:
     if value is None:
         return None
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _excess(record: dict[str, Any] | None, horizon: str) -> float | None:
+    slot = _horizon_slot(record, horizon)
+    if slot is None:
+        return None
+    return _as_float(slot.get("excess_return_pct"))
+
+
+def _move(record: dict[str, Any] | None, horizon: str) -> dict[str, Any]:
+    """Price path behind the excess number, for a plain-language note."""
+    slot = _horizon_slot(record, horizon)
+    if slot is None:
+        return {
+            "stock_return_pct": None,
+            "market_return_pct": None,
+            "entry_close": None,
+            "fwd_close": None,
+            "fwd_date": None,
+        }
+    return {
+        "stock_return_pct": _as_float(slot.get("return_pct")),
+        "market_return_pct": _as_float(slot.get("market_return_pct")),
+        "entry_close": _as_float((record or {}).get("entry_close")),
+        "fwd_close": _as_float(slot.get("fwd_close")),
+        "fwd_date": str(slot.get("fwd_date") or "") or None,
+    }
 
 
 def _scan_report_dirs(stock_root: Path) -> dict[tuple[str, str], dict[str, Any]]:
@@ -229,6 +259,7 @@ def _case(
     excess: float | None,
     audit_reason: str | None,
     epsilon: float,
+    move: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     regime = None
     if facts and facts.get("chip_regime") not in (None, "", "unknown"):
@@ -283,6 +314,11 @@ def _case(
         "chip_regime": regime,
         "call": call,
         "excess_return_pct": excess,
+        "stock_return_pct": (move or {}).get("stock_return_pct"),
+        "market_return_pct": (move or {}).get("market_return_pct"),
+        "entry_close": (move or {}).get("entry_close"),
+        "fwd_close": (move or {}).get("fwd_close"),
+        "fwd_date": (move or {}).get("fwd_date"),
         "verdict": verdict,
         "failures": failures,
         "round1_passed": round1_passed,
@@ -330,6 +366,7 @@ def evaluate(
                 excess=_excess(outcomes.get((stock_id, day)), horizon),
                 audit_reason=audit.get((stock_id, day)),
                 epsilon=epsilon,
+                move=_move(outcomes.get((stock_id, day)), horizon),
             )
         )
 
@@ -350,6 +387,7 @@ def evaluate(
                 excess=_excess(outcomes.get((stock_id, day)), horizon),
                 audit_reason=reason,
                 epsilon=epsilon,
+                move=_move(outcomes.get((stock_id, day)), horizon),
             )
         )
 

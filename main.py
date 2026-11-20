@@ -60,6 +60,10 @@ COMMANDS: dict[str, tuple[Path, str | None]] = {
     "outcome-label": (ROOT / "tools" / "outcome_label.py", None),
     "calibrate": (ROOT / "tools" / "calibrate_thresholds.py", None),
     "eval-calls": (ROOT / "tools" / "eval_calls.py", None),
+    "outcome-review": (
+        ROOT / ".agents" / "skills" / "outcome-review" / "outcome_review_gate.py",
+        None,
+    ),
 }
 
 # Phase 0: these commands share agent.tools / skill functions in-process.
@@ -70,6 +74,7 @@ INPROC_COMMANDS: dict[str, tuple[str, str]] = {
     "market-daily": ("market-daily", "market_daily_gate"),
     "market-daily-chat": ("market-daily", "market_day_chat"),
     "market-close": ("market-close", "market_close_gate"),
+    "outcome-review": ("outcome-review", "outcome_review_gate"),
 }
 
 
@@ -135,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         print("         uv run --extra a2a python main.py a2a-inspector --howto")
         print("         uv run --extra a2a python main.py a2a-adk --howto")
         print('         uv run --extra stock --extra ui python main.py agent -- "幫我處理今天持股"')
+        print('         uv run python main.py outcome-review')
+        print('         uv run --extra stock --extra ui python main.py agent -- "上週個股判斷後來怎樣"')
         print("         uv run --extra stock --extra ui python main.py schedule --once")
         return 0
 

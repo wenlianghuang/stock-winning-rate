@@ -45,6 +45,7 @@ from agent.policy import (
     DIGEST_SKIPPED,
     GATE_TOOLS,
     INTENT_MARKET_OUTLOOK,
+    INTENT_OUTCOME_REVIEW,
     INTENT_PROCESS_HOLDINGS,
     INTENT_STOCK_DECISION,
     INTENT_WATCHLIST_SCAN,
@@ -116,6 +117,8 @@ SCAN_MARKERS = (
     "要注意哪",
 )
 WATCHLIST_MARKERS = ("觀察名單", "watchlist", "自選")
+OUTCOME_MARKERS = ("後來怎樣", "後來怎麼樣", "事後對帳", "判斷後來")
+DATE_IN_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 @dataclass
@@ -213,6 +216,8 @@ class AgentRun:
 def classify_intent(text: str) -> ClassifiedIntent:
     stripped = (text or "").strip()
     stocks = list(dict.fromkeys(STOCK_RE.findall(stripped)))
+    if any(marker in stripped for marker in OUTCOME_MARKERS):
+        return ClassifiedIntent(kind=INTENT_OUTCOME_REVIEW, text=stripped, stocks=stocks)
     if any(marker in stripped for marker in SCAN_MARKERS):
         return ClassifiedIntent(kind=INTENT_WATCHLIST_SCAN, text=stripped, stocks=stocks)
     if any(marker in stripped for marker in PROCESS_MARKERS) or (
@@ -414,6 +419,7 @@ def build_plan(
     max_rounds: int = DEFAULT_MAX_GATE_ROUNDS,
     permissions: Permissions | None = None,
     triage_top_k: int = DEFAULT_TOP_K,
+    explicit_outcome_date: str | None = None,
 ) -> Plan:
     if classified.kind == INTENT_PROCESS_HOLDINGS:
         plan = _plan_process_holdings(
@@ -431,6 +437,8 @@ def build_plan(
             csv_missing=csv_missing,
             triage_top_k=triage_top_k,
         )
+    elif classified.kind == INTENT_OUTCOME_REVIEW:
+        plan = _plan_outcome_review(classified, explicit_date=explicit_outcome_date)
     elif classified.kind == INTENT_STOCK_DECISION:
         plan = _plan_stock_decision(
             classified,
@@ -676,6 +684,52 @@ def _plan_stock_decision(
     )
 
 
+def _plan_outcome_review(
+    classified: ClassifiedIntent,
+    *,
+    explicit_date: str | None,
+) -> Plan:
+    notes = [
+        "未指定日期時，先用磁碟上的收盤補 5 日超額，再以最新收盤往前第 5 個交易日的判斷對帳。"
+        "句子裡的日期才是指定判斷日。不用 1 日或 3 日補準確率。",
+    ]
+    text_dates = DATE_IN_TEXT.findall(classified.text)
+    # A date in the sentence or --trade-date is the judgment day. Otherwise the
+    # tool walks back 5 sessions from the latest close.
+    day = text_dates[0] if text_dates else explicit_date
+    years = {item[:4] for item in text_dates}
+    stocks = [
+        sid
+        for sid in classified.stocks
+        if not sid.startswith(("19", "20")) and sid not in years
+    ]
+    args: dict[str, Any] = {"max_rounds": 2}
+    if day:
+        args["trade_date"] = day
+    if len(stocks) == 1:
+        args["stock"] = stocks[0]
+    elif len(stocks) > 1:
+        notes.append("提到多檔代號，這次讀全部列，不單檔過濾。")
+    return Plan(
+        intent=classified.text,
+        intent_kind=INTENT_OUTCOME_REVIEW,
+        trade_date=day,
+        steps=[
+            PlanStep(
+                tool="run_outcome_review",
+                args=args,
+                reason=(
+                    f"只對帳 {day} 的判斷"
+                    if day
+                    else "對帳最新收盤往前第 5 個交易日的判斷"
+                ),
+            )
+        ],
+        notes=notes,
+        digest_status=DIGEST_NA,
+    )
+
+
 def _plan_market_outlook(
     classified: ClassifiedIntent,
     *,
@@ -809,6 +863,10 @@ def default_dispatch(tool: str, args: dict[str, Any]) -> Any:
         from agent.tools.market import run_market_daily
 
         return run_market_daily(**args)
+    if tool == "run_outcome_review":
+        from agent.tools.outcome import run_outcome_review
+
+        return run_outcome_review(**args)
     if tool == "answer_market_chat":
         from agent.tools.market import answer_market_chat
 
@@ -1138,6 +1196,7 @@ def run_agent(
     budget = Budget(max_calls=ctx.max_tool_calls, max_elapsed_sec=ctx.max_elapsed_sec)
     probes: list[StepResult] = []
 
+    requested_date = ctx.trade_date
     trade_date = ctx.trade_date
     if not trade_date:
         probe = _call(runner, budget, "get_last_trading_date", {}, reason="解析籌碼交易日")
@@ -1181,6 +1240,7 @@ def run_agent(
             max_rounds=ctx.max_rounds,
             permissions=perms,
             triage_top_k=ctx.triage_top_k,
+            explicit_outcome_date=requested_date,
         )
     else:
         if not plan.trade_date:
@@ -1789,7 +1849,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--role",
         default=None,
         choices=sorted(KNOWN_ROLES),
-        help="覆蓋角色 allowlist（預設依意圖：路況=chat，其餘=orchestrator）",
+        help="覆蓋角色 allowlist（預設依意圖：路況=chat，事後對帳=research，觀察名單=data，其餘=orchestrator）",
     )
     parser.add_argument(
         "--skip-research",

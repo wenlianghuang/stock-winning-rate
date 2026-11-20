@@ -12,6 +12,7 @@ SKILL_DIRS = {
     "report-gate": ROOT / ".agents" / "skills" / "report-gate",
     "position-gate": ROOT / ".agents" / "skills" / "position-gate",
     "market-daily": ROOT / ".agents" / "skills" / "market-daily",
+    "outcome-review": ROOT / ".agents" / "skills" / "outcome-review",
     "portfolio-gate": ROOT / ".agents" / "skills" / "portfolio-gate",
 }
 

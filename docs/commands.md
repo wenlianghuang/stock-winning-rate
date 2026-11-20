@@ -278,6 +278,12 @@ uv run python main.py gate-stats -- --date 2026-08-18 --stock 2330 --json
 # 5 個交易日後、outcome-label 更新完再跑。產物在 reports/eval/
 uv run python main.py eval-calls
 uv run python main.py eval-calls -- --date 2026-08-18 --stock 2330 --json
+
+# 事後對帳短文。不指定日期：最新收盤往前第 5 個交易日，並先補超額
+# 產物仍在 reports/eval/outcome_review.md
+uv run python main.py outcome-review
+uv run python main.py outcome-review -- --date 2026-11-03 --skip-agy
+uv run --extra stock --extra ui python main.py agent -- "上週個股判斷後來怎樣"
 ```
 
 ---

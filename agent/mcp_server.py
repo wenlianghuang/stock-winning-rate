@@ -45,6 +45,7 @@ TOOL_NAMES = (
     "run_market_daily",
     "answer_market_chat",
     "answer_report_chat",
+    "run_outcome_review",
     "draft_digest",
     "send_digest",
 )
@@ -361,6 +362,36 @@ def _register_tools(mcp: FastMCP) -> None:
                     message=message,
                     trade_date=_opt_str(trade_date),
                     use_llm=use_llm,
+                )
+            )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, title="Outcome review"),
+        description=(
+            "個股判斷事後對帳。讀已算好的 5 日超額與當天 chip_regime，寫三節短文。"
+            "不重算籌碼、不抓價格、不用 1 日或 3 日補準確率。"
+            "模型沒過驗證就只留規則統計。需要 agy，除非 skip_agy=true。"
+            "不填 trade_date 時，用最新收盤往前第 5 個交易日的判斷，並先補磁碟上的 5 日超額。"
+            "填了 trade_date 就只看那個判斷日，不再往前移。"
+        ),
+    )
+    def run_outcome_review(
+        trade_date: str | None = None,
+        stock: str | None = None,
+        max_rounds: int = 2,
+        skip_agy: bool = False,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        from agent.tools.outcome import run_outcome_review as impl
+
+        with _stderr_stdout():
+            return _payload(
+                impl(
+                    trade_date=_opt_str(trade_date),
+                    stock=_opt_str(stock),
+                    max_rounds=max_rounds,
+                    skip_agy=skip_agy,
+                    refresh=refresh,
                 )
             )
 

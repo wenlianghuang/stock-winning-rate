@@ -153,6 +153,7 @@ Plan 不是「再跑一次 2330」，而是讀 `holdings.json` 裡**每一檔**�
 | `process_holdings` | 處理持股 | 幫我處理今天持股 | `process_holdings` |
 | `stock_research` | 個股深度報告 | （裸代號補成「{代號} 要不要動」） | `stock_decision` |
 | `market_outlook` | 開盤前日報 | 明天開盤怎麼看 | `market_outlook` |
+| `outcome_review` | 事後對帳 | 上週個股判斷後來怎樣 | `outcome_review` |
 
 對方選錯 skill、但句子寫「2330 要不要動」時，`resolve_intent` 仍回傳原句，分類走 `stock_decision`。真正決定跑哪些 tool 的是 orchestrator，不是 Card 上的按鈕標籤。
 

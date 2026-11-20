@@ -60,7 +60,13 @@ CARD_PATH = "/.well-known/agent-card.json"
 SKILL_PROCESS_HOLDINGS = "process_holdings"
 SKILL_STOCK_RESEARCH = "stock_research"
 SKILL_MARKET_OUTLOOK = "market_outlook"
-SKILL_IDS = (SKILL_PROCESS_HOLDINGS, SKILL_STOCK_RESEARCH, SKILL_MARKET_OUTLOOK)
+SKILL_OUTCOME_REVIEW = "outcome_review"
+SKILL_IDS = (
+    SKILL_PROCESS_HOLDINGS,
+    SKILL_STOCK_RESEARCH,
+    SKILL_MARKET_OUTLOOK,
+    SKILL_OUTCOME_REVIEW,
+)
 
 SERVER_DESCRIPTION = (
     "台股籌碼作業 Agent。一句話意圖交給既有 orchestrator（plan + policy + agent.tools）。"
@@ -145,6 +151,18 @@ def build_agent_card(*, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> A
             input_modes=modes_in,
             output_modes=modes_out,
         ),
+        AgentSkill(
+            id=SKILL_OUTCOME_REVIEW,
+            name="事後對帳",
+            description=(
+                "個股報告當天的偏多／偏空，對上已經實現的 5 日超額。"
+                "不重算籌碼，也不把尚未成熟的列算進準確率。"
+            ),
+            tags=["twse", "eval", "outcomes"],
+            examples=["上週個股判斷後來怎樣"],
+            input_modes=modes_in,
+            output_modes=modes_out,
+        ),
     ]
     return AgentCard(
         name=SERVER_NAME,
@@ -188,6 +206,8 @@ def resolve_intent(text: str, skill: str | None = None) -> str:
         return "幫我處理今天持股"
     if skill_id == SKILL_MARKET_OUTLOOK and not stripped:
         return "明天開盤怎麼看"
+    if skill_id == SKILL_OUTCOME_REVIEW and not stripped:
+        return "上週個股判斷後來怎樣"
     if skill_id == SKILL_STOCK_RESEARCH and stripped:
         codes = STOCK_RE.findall(stripped)
         if codes and stripped == codes[0]:

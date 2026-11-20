@@ -35,6 +35,7 @@ ALLOWED_TOOLS = frozenset(
         "run_report_gate",
         "run_position_gate",
         "run_market_daily",
+        "run_outcome_review",
         "answer_market_chat",
         "answer_report_chat",
         "draft_digest",
@@ -45,9 +46,19 @@ ALLOWED_TOOLS = frozenset(
 DATA_TOOLS = frozenset(
     {"get_last_trading_date", "fetch_chips", "build_chip_facts", "triage_watchlist"}
 )
-RESEARCH_TOOLS = frozenset({"run_report_gate", "run_market_daily", "answer_market_chat", "answer_report_chat"})
+RESEARCH_TOOLS = frozenset(
+    {
+        "run_report_gate",
+        "run_market_daily",
+        "run_outcome_review",
+        "answer_market_chat",
+        "answer_report_chat",
+    }
+)
 POSITION_TOOLS = frozenset({"run_position_gate"})
-GATE_TOOLS = frozenset({"run_report_gate", "run_position_gate", "run_market_daily"})
+GATE_TOOLS = frozenset(
+    {"run_report_gate", "run_position_gate", "run_market_daily", "run_outcome_review"}
+)
 NOTIFY_TOOLS = frozenset({"draft_digest", "send_digest"})
 NEEDS_CSV_TOOLS = frozenset({"run_report_gate", "run_position_gate", "build_chip_facts"})
 
@@ -80,6 +91,7 @@ TOOL_ACTOR: dict[str, str] = {
     "triage_watchlist": ROLE_DATA,
     "run_report_gate": ROLE_RESEARCH,
     "run_market_daily": ROLE_RESEARCH,
+    "run_outcome_review": ROLE_RESEARCH,
     "answer_market_chat": ROLE_CHAT,
     "answer_report_chat": ROLE_CHAT,
     "run_position_gate": ROLE_POSITION,
@@ -123,6 +135,7 @@ INTENT_PROCESS_HOLDINGS = "process_holdings"
 INTENT_STOCK_DECISION = "stock_decision"
 INTENT_MARKET_OUTLOOK = "market_outlook"
 INTENT_WATCHLIST_SCAN = "watchlist_scan"
+INTENT_OUTCOME_REVIEW = "outcome_review"
 
 KNOWN_INTENTS = frozenset(
     {
@@ -130,6 +143,7 @@ KNOWN_INTENTS = frozenset(
         INTENT_STOCK_DECISION,
         INTENT_MARKET_OUTLOOK,
         INTENT_WATCHLIST_SCAN,
+        INTENT_OUTCOME_REVIEW,
     }
 )
 
@@ -163,6 +177,8 @@ def role_for_intent(intent_kind: str) -> str:
         return ROLE_CHAT
     if intent_kind == INTENT_WATCHLIST_SCAN:
         return ROLE_DATA
+    if intent_kind == INTENT_OUTCOME_REVIEW:
+        return ROLE_RESEARCH
     return ROLE_ORCHESTRATOR
 
 
@@ -350,7 +366,8 @@ def validate_plan_schema(data: dict[str, Any]) -> list[str]:
     kind = data.get("intent_kind")
     if kind not in KNOWN_INTENTS:
         errors.append(
-            "intent_kind 必須是 process_holdings / stock_decision / market_outlook / watchlist_scan"
+            "intent_kind 必須是 process_holdings / stock_decision / market_outlook / "
+            "watchlist_scan / outcome_review"
         )
     steps = data.get("steps")
     if not isinstance(steps, list):

@@ -50,13 +50,14 @@ python main.py a2a
 
 ### 3.1 `agent/a2a_server.py`：包 orchestrator，不包 script
 
-`build_agent_card()` 宣告三個 skill，對應 Phase 2 的 golden 意圖：
+`build_agent_card()` 宣告 Card 上的 skill。前三個對應 Phase 2 的 golden 意圖，事後對帳是後來加的：
 
 | Skill id | 例子 | 進 orchestrator 的意圖 |
 |----------|------|------------------------|
 | `process_holdings` | 幫我處理今天持股 | 原句 |
 | `stock_research` | 2330 要不要動 | 四碼代號會補成「要不要動」 |
 | `market_outlook` | 明天開盤怎麼看 | 原句或 skill 預設句 |
+| `outcome_review` | 上週個股判斷後來怎樣 | 原句或 skill 預設句；只跑 5 日對帳 |
 
 `StockAgentExecutor` 實作 A2A 1.0 的 **task lifecycle**（先 enqueue `Task`，再 working／artifact／completed）。訊息文字交給 `handle_intent` → `run_agent`。預設 `approve_send=False`，policy 不會寄信。回傳 artifact 會先列 `report_files`（`md_path`／是否 skip PDF），JSON 不塞整篇 markdown。A2A 預設 `skip_pdf=True`，report-gate／position-gate **不會寫 PDF**（只寫 `.md`）。
 

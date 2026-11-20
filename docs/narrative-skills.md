@@ -62,6 +62,7 @@ Python 驗證。沒過就把問題清單接在同一份 prompt 後面再寫一�
 | 主題袖口 | `theme-narrative` | `ui/portfolio_prompts.py` | 同上，依 `mode=theme` 選這份 |
 | 題材新聞 | `concept-narrative` | `concept-news/process_report.py` | `concept-news` |
 | 美股科技簡報 | `us-tech-narrative` | `us-tech-news/process_report.py` | `us-tech-news` |
+| 事後對帳 | `outcome-narrative` | `outcome-review/outcome_prompts.py` | `outcome-review` |
 
 新手組合和主題袖口是兩份 skill。同一輪只貼其中一份，避免袖口報告吃到新手紀律，或反過來。
 
@@ -78,6 +79,7 @@ Python 驗證。沒過就把問題清單接在同一份 prompt 後面再寫一�
 - 部位情境的百分比。skill 只寫「百分比照系統給的數字，不可改」；48%、30%、22% 這種權重是系統算的
 - `validate_*.py` 發出的問題代碼，以及 `FIX_HINT_BY_CODE` 那組對人話。句子可以跟寫作規格放在一起想，查表仍在 gate
 - 開盤前 `market_day_chat.py` 和個股 `stock_report_chat.py` 的問答人設。多數事實題走模板，長尾走 Ollama。問答流程沒有改成由 agy skill 現查現答
+- 事後對帳的 hit／miss／abstain／flat／pending、準確率句、失敗件數。`outcome-narrative` 只規定三節怎麼寫；判對錯的仍是 `eval_calls.py`
 
 ---
 
