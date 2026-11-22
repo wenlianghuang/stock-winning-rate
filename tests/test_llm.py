@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 import unittest
@@ -19,6 +20,28 @@ from agent.llm import (  # noqa: E402
     resolve_ollama_model,
     resolved_backend,
 )
+
+
+def _load_us_tech_process_report():
+    """Load us-tech process_report under its own name.
+
+    concept-news also publishes process_report. A bare import reuses whichever
+    copy unittest already loaded.
+    """
+    name = "us_tech_process_report"
+    path = ROOT / ".agents" / "skills" / "us-tech-news" / "process_report.py"
+    loaded = sys.modules.get(name)
+    if loaded is not None and Path(getattr(loaded, "__file__", "")).resolve() == path.resolve():
+        return loaded
+    directory = str(path.parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class LlmAdapterTests(unittest.TestCase):
@@ -81,9 +104,8 @@ class LlmAdapterTests(unittest.TestCase):
             "portfolio_gate": ROOT / ".agents" / "skills" / "portfolio-gate",
             "market_daily_gate": ROOT / ".agents" / "skills" / "market-daily",
             "market_weekly_gate": ROOT / ".agents" / "skills" / "market-weekly",
-            "process_report": ROOT / ".agents" / "skills" / "us-tech-news",
         }
-        for name, directory in modules.items():
+        for directory in modules.values():
             text = str(directory)
             if text not in sys.path:
                 sys.path.insert(0, text)
@@ -96,9 +118,9 @@ class LlmAdapterTests(unittest.TestCase):
                 import market_weekly_gate
                 import portfolio_gate
                 import position_gate
-                import process_report
                 import report_gate
 
+                process_report = _load_us_tech_process_report()
                 for module in (
                     report_gate,
                     position_gate,
@@ -110,7 +132,7 @@ class LlmAdapterTests(unittest.TestCase):
                     self.assertEqual(module.run_agy("prompt"), ("body", 2))
         self.assertEqual(invoke.call_count, 6)
         for call in invoke.call_args_list:
-            self.assertEqual(call.kwargs["min_chars"], 20)
+            self.assertEqual(call.kwargs["min_chars"], 120)
 
     def test_missing_agy_raises_file_not_found(self) -> None:
         env = os.environ.copy()

@@ -361,7 +361,11 @@ def resolve_agy_bin() -> str:
 def run_agy(prompt: str) -> tuple[str, int]:
     llm = _import_llm()
     try:
-        done = llm.invoke_agy(prompt, timeout_sec=llm.AGY_TIMEOUT_SEC, min_chars=20)
+        done = llm.invoke_agy(
+            prompt,
+            timeout_sec=llm.AGY_TIMEOUT_SEC,
+            min_chars=llm.GATE_MIN_CHARS,
+        )
     except FileNotFoundError as exc:
         raise RuntimeError(str(exc)) from exc
     return done.text, done.exit_code
