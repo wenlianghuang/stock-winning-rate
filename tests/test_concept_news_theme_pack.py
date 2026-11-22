@@ -81,9 +81,29 @@ class ThemePackTests(unittest.TestCase):
         self.assertEqual(member.name, "國巨*")
 
     def test_empty_theme_still_has_queries(self) -> None:
-        pack = build_theme_pack("test_equipment")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            universe = root / "universe.json"
+            queries = root / "queries.json"
+            universe.write_text(
+                json.dumps(
+                    {"themes": {"scratch": {"label": "空題材"}}, "candidates": []},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            queries.write_text(
+                json.dumps(
+                    {"queries": {"scratch": ["空題材新聞", "另一個詞"]}},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            pack = build_theme_pack(
+                "scratch", universe_path=universe, queries_path=queries
+            )
         self.assertEqual(pack.members, ())
-        self.assertGreaterEqual(len(pack.queries), 2)
+        self.assertEqual(pack.queries, ("空題材新聞", "另一個詞"))
 
     def test_unknown_theme_raises(self) -> None:
         with self.assertRaises(ValueError):
