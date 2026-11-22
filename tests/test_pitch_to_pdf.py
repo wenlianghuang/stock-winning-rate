@@ -1,4 +1,8 @@
-"""Tests for docs/pitch_to_pdf.py (HTML transform; no Chrome required)."""
+"""Tests for docs/pitch_to_pdf.py (HTML transform; no Chrome required).
+
+docs/pitch* stays gitignored, including the PDF output. CI checkouts do not
+have the script, so this module skips instead of failing at import.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "docs" / "pitch_to_pdf.py"
+_SKIP_REASON = "docs/pitch_to_pdf.py is gitignored with the pitch PDFs"
 
 
 def _load_module():
@@ -20,7 +25,7 @@ def _load_module():
     return mod
 
 
-pitch_to_pdf = _load_module()
+pitch_to_pdf = _load_module() if MODULE_PATH.is_file() else None
 
 MINI_HTML = """<!DOCTYPE html>
 <html>
@@ -43,6 +48,7 @@ MINI_HTML = """<!DOCTYPE html>
 """
 
 
+@unittest.skipUnless(MODULE_PATH.is_file(), _SKIP_REASON)
 class PrepareProjectionHtmlTests(unittest.TestCase):
     def test_injects_style_and_script(self) -> None:
         out = pitch_to_pdf.prepare_projection_html(MINI_HTML)

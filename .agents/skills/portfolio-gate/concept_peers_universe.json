@@ -1273,6 +1273,50 @@
         "pcb"
       ],
       "defensive": false
+    },
+    {
+      "id": "6223",
+      "name": "旺矽",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "test_equipment",
+      "themes": [
+        "test_equipment"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6515",
+      "name": "精測",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "test_equipment",
+      "themes": [
+        "test_equipment"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6510",
+      "name": "穎崴",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "test_equipment",
+      "themes": [
+        "test_equipment"
+      ],
+      "defensive": false
+    },
+    {
+      "id": "6683",
+      "name": "雍智",
+      "asset_class": "stock",
+      "category": "theme_stock",
+      "sector": "test_equipment",
+      "themes": [
+        "test_equipment"
+      ],
+      "defensive": false
     }
   ]
 }

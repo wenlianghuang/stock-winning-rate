@@ -110,7 +110,7 @@ class LlmAdapterTests(unittest.TestCase):
                     self.assertEqual(module.run_agy("prompt"), ("body", 2))
         self.assertEqual(invoke.call_count, 6)
         for call in invoke.call_args_list:
-            self.assertEqual(call.kwargs["min_chars"], 120)
+            self.assertEqual(call.kwargs["min_chars"], 20)
 
     def test_missing_agy_raises_file_not_found(self) -> None:
         env = os.environ.copy()

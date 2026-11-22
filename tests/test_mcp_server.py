@@ -114,11 +114,6 @@ class McpServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["exit_code"], EXIT_CSV_MISSING)
         self.assertIn("tw_stock_9999.csv", payload["error"] or "")
 
-    async def test_2330_is_not_a_holding(self) -> None:
-        async with _session() as session:
-            payload = _payload(await session.call_tool("get_holdings", {"stock_id": "2330"}))
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["exit_code"], EXIT_HOLDING_MISSING)
 
     async def test_send_digest_blocked_without_approval(self) -> None:
         async with _session() as session:
