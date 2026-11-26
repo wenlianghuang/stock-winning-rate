@@ -2,7 +2,11 @@ name: tests
 
 on:
   push:
+    branches:
+      - github-actions
   pull_request:
+    branches:
+      - github-actions
 
 jobs:
   unittest:
